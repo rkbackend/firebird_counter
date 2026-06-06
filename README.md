@@ -154,6 +154,39 @@ python3 -m proc_usage top --config configs/python_service.json --limit 10
 
 Если Firebird-часть подключена правильно, вы увидите `PROC_A` в статистике `SQLite`.
 
+## Локальный Benchmark
+
+Для нагрузочного сравнения `without_plugin` и `with_plugin` используйте harness из [bench](./bench):
+
+```bash
+python3 bench/run_benchmark.py \
+  --mode both \
+  --user sysdba \
+  --password 'YOUR_PASSWORD' \
+  --client-count 64 \
+  --procedure-count 1000 \
+  --target-runtime-sec 20 \
+  --iterations 3 \
+  --sudo-command 'sudo -S'
+```
+
+Что делает benchmark:
+
+- создает отдельную benchmark-БД на Firebird
+- генерирует `1000` процедур `BENCH_PROC_0001 .. BENCH_PROC_1000`
+- запускает `64` параллельных клиента `isql-fb`
+- смешивает `EXECUTE PROCEDURE`, `SELECT`, `UPDATE`, `INSERT` и `DELETE`
+- прогоняет нагрузку сначала без `ProcUsageTrace`, затем с `ProcUsageTrace`
+- сохраняет JSON-отчет в `bench/results/` или, если каталог недоступен на запись, в `workspace/results/`
+
+В этой установке Firebird локальный benchmark использует TCP-подключение вида:
+
+```text
+localhost/3050:/tmp/firebird_benchmark_<run_id>.fdb
+```
+
+Это обходит ограничения локального сокета `/tmp/firebird` и гарантирует, что нагрузка идет через сервер Firebird, а не через embedded engine.
+
 ## Общий Spool-Каталог
 
 Когда Firebird пишет spool-файлы от имени системного пользователя `firebird`, collector, запущенный от другого пользователя, может не суметь переименовать файлы внутри spool-каталога.
