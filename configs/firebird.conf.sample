@@ -1,0 +1,5 @@
+# Использовать наш trace plugin вместо стандартной реализации `fbtrace`.
+TracePlugin = ProcUsageTrace
+
+# Включить системный audit trace с использованием sample-конфига trace.
+AuditTraceConfigFile = /absolute/path/to/fbtrace.conf

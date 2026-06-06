@@ -1,0 +1,8 @@
+# Firebird загрузит динамический модуль `proc_usage_trace`
+# и использует зарегистрированный внутри него плагин `ProcUsageTrace`.
+Plugin = ProcUsageTrace
+{
+  Module = proc_usage_trace
+  RegisterName = ProcUsageTrace
+  ConfigFile = /absolute/path/to/proc_usage_plugin.conf
+}

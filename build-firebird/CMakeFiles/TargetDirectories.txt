@@ -1,0 +1,4 @@
+/home/j8r/code/firebird_counter/build-firebird/CMakeFiles/proc_usage_core.dir
+/home/j8r/code/firebird_counter/build-firebird/CMakeFiles/proc_usage_firebird_plugin.dir
+/home/j8r/code/firebird_counter/build-firebird/CMakeFiles/edit_cache.dir
+/home/j8r/code/firebird_counter/build-firebird/CMakeFiles/rebuild_cache.dir

@@ -1,0 +1,2 @@
+/usr/bin/ar qc libproc_usage_core.a CMakeFiles/proc_usage_core.dir/cpp/src/config.cpp.o CMakeFiles/proc_usage_core.dir/cpp/src/collector.cpp.o CMakeFiles/proc_usage_core.dir/cpp/src/spool_writer.cpp.o CMakeFiles/proc_usage_core.dir/cpp/src/firebird_bridge.cpp.o
+/usr/bin/ranlib libproc_usage_core.a

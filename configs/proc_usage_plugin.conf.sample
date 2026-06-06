@@ -1,0 +1,15 @@
+# Путь, куда сборщик пишет компактные `JSONL`-snapshot-файлы.
+spool_dir = /tmp/firebird_proc_usage_spool
+
+# Необязательный debug-log, который пишет сам процесс плагина Firebird.
+debug_log_path = /tmp/proc_usage_trace_debug.log
+
+# Как часто счетчики из памяти сбрасываются в spool-файлы.
+flush_interval_sec = 30
+
+# Необязательный allow-list фрагментов пути к БД, разделенных `;`.
+# Оставьте пустым, чтобы учитывать все базы.
+include_databases =
+
+# Необязательный deny-list фрагментов пути к БД, разделенных `;`.
+exclude_databases =
