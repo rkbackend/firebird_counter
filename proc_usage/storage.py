@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Optional
 
 from proc_usage.spool import SpoolFileState, SpoolRecord, group_records
 
@@ -143,7 +143,7 @@ class SQLiteUsageStorage:
             ).fetchall()
         return rows
 
-    def procedure_stats(self, procedure: str, database: str | None = None) -> list[sqlite3.Row]:
+    def procedure_stats(self, procedure: str, database: Optional[str] = None) -> list[sqlite3.Row]:
         with self._connect() as connection:
             if database is None:
                 rows = connection.execute(

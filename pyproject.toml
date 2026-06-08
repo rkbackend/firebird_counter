@@ -6,8 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "firebird-proc-usage"
 version = "0.1.0"
 description = "Low-overhead Firebird procedure usage collector"
-requires-python = ">=3.12"
+requires-python = ">=3.9"
 
 [project.scripts]
 proc-usage = "proc_usage.cli:main"
-

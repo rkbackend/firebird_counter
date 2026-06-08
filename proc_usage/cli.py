@@ -5,6 +5,7 @@ import json
 import signal
 import threading
 from pathlib import Path
+from typing import Optional
 
 from proc_usage.config import ServiceConfig, load_service_config
 from proc_usage.service import ProcUsageService
@@ -128,7 +129,7 @@ def handle_sample_config(args: argparse.Namespace) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     return args.handler(args)

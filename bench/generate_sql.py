@@ -4,9 +4,10 @@ import argparse
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Optional
 
 
-@dataclass(slots=True)
+@dataclass
 class ClientScriptSpec:
     client_id: int
     path: str
@@ -15,7 +16,7 @@ class ClientScriptSpec:
     logical_operations: int
 
 
-@dataclass(slots=True)
+@dataclass
 class GeneratedBenchmark:
     bootstrap_sql: str
     reset_sql: str
@@ -235,8 +236,8 @@ def generate_benchmark_artifacts(
     client_count: int,
     procedure_count: int,
     rounds_per_client: int,
-    data_row_count: int | None = None,
-    aux_row_count: int | None = None,
+    data_row_count: Optional[int] = None,
+    aux_row_count: Optional[int] = None,
 ) -> GeneratedBenchmark:
     output_dir.mkdir(parents=True, exist_ok=True)
     data_row_count = data_row_count or max(procedure_count, 2048)
@@ -306,7 +307,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     args = _build_parser().parse_args(argv)
     manifest = generate_benchmark_artifacts(
         output_dir=args.output_dir,

@@ -15,6 +15,7 @@
 ## Текущее Состояние
 
 Python-часть готова к запуску и работает только на стандартной библиотеке.
+Минимальная поддерживаемая версия Python для collector/CLI: `3.9`.
 
 `C++`-ядро сборщика реализовано отдельно от Firebird SDK, поэтому его проще читать и тестировать само по себе. Специфичная для Firebird точка входа собирается через отдельную build-опцию, потому что для нее нужны заголовки SDK Firebird и `C++`-компилятор.
 
@@ -73,6 +74,60 @@ python3 -m proc_usage show MY_PROC --config configs/python_service.json
 cmake -S . -B build -DPROC_USAGE_ENABLE_FIREBIRD_SDK=ON -DFIREBIRD_INCLUDE_DIR=/usr/include/firebird
 cmake --build build
 ```
+
+## RPM / `yum` Установка
+
+В репозитории есть готовая RPM-упаковка:
+
+- spec-файл: [packaging/rpm/firebird-proc-usage.spec](/home/j8r/code/firebird_counter/packaging/rpm/firebird-proc-usage.spec)
+- systemd unit: [packaging/rpm/proc-usage.service](/home/j8r/code/firebird_counter/packaging/rpm/proc-usage.service)
+- production-конфиг collector: [packaging/rpm/python_service.json](/home/j8r/code/firebird_counter/packaging/rpm/python_service.json)
+- production-конфиг plugin: [packaging/rpm/proc_usage_plugin.conf](/home/j8r/code/firebird_counter/packaging/rpm/proc_usage_plugin.conf)
+
+Пакет собирается в двух частях:
+
+- `firebird-proc-usage` - Python collector, CLI, конфиги и `systemd` unit
+- `firebird-proc-usage-firebird-plugin` - `.so` trace plugin для Firebird
+
+Типовой порядок на `RHEL`/`CentOS`/`AlmaLinux`/`Rocky`:
+
+```bash
+yum install -y rpm-build gcc-c++ cmake make \
+  python3 python3-devel python3-setuptools python3-build python3-installer \
+  pyproject-rpm-macros systemd-rpm-macros firebird-devel
+```
+
+Подготовьте source tarball, чтобы корневой каталог внутри архива назывался `firebird-proc-usage-0.1.0/`, затем соберите RPM:
+
+```bash
+rpmbuild -bb packaging/rpm/firebird-proc-usage.spec --with firebird_plugin
+```
+
+Если нужен только Python collector без Firebird SDK:
+
+```bash
+rpmbuild -bb packaging/rpm/firebird-proc-usage.spec --without firebird_plugin
+```
+
+После сборки установка выглядит обычно:
+
+```bash
+yum install -y ~/rpmbuild/RPMS/*/firebird-proc-usage-0.1.0-1*.rpm
+yum install -y ~/rpmbuild/RPMS/*/firebird-proc-usage-firebird-plugin-0.1.0-1*.rpm
+```
+
+Что ставится по умолчанию:
+
+- collector config: `/etc/firebird-proc-usage/python_service.json`
+- plugin config: `/etc/firebird-proc-usage/firebird/proc_usage_plugin.conf`
+- spool и SQLite: `/var/lib/firebird-proc-usage/`
+- systemd service: `proc-usage.service`
+
+После установки останется:
+
+1. Подключить `libproc_usage_trace.so` в Firebird `plugins.conf`
+2. При необходимости скорректировать каталог plugin'ов через macro `%{_libdir}/firebird/plugins` в spec-файле под вашу сборку Firebird
+3. Включить collector: `systemctl enable --now proc-usage.service`
 
 ## Заметки По Интеграции С Firebird
 

@@ -12,8 +12,9 @@ import sys
 import tempfile
 import time
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Dict, Optional
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -29,40 +30,40 @@ DEFAULT_PLUGIN_NAME = "ProcUsageTrace"
 DEFAULT_SERVICE_NAME = "firebird3.0"
 
 
-@dataclass(slots=True)
+@dataclass
 class PluginSettings:
     spool_dir: Path
     flush_interval_sec: int
-    debug_log_path: Path | None
+    debug_log_path: Optional[Path]
 
 
-@dataclass(slots=True)
+@dataclass
 class IterationResult:
     iteration: int
     sql_runtime_sec: float
-    ingest_runtime_sec: float | None
+    ingest_runtime_sec: Optional[float]
     spool_file_count: int
     expected_execute_procedure_calls: int
-    observed_execute_procedure_calls: int | None
-    distinct_procedures_observed: int | None
+    observed_execute_procedure_calls: Optional[int]
+    distinct_procedures_observed: Optional[int]
     valid: bool
     note: str
 
 
-@dataclass(slots=True)
+@dataclass
 class ModeResult:
     mode: str
     rounds_per_client: int
     iterations: list[IterationResult]
     avg_sql_runtime_sec: float
     min_sql_runtime_sec: float
-    avg_ingest_runtime_sec: float | None
-    min_ingest_runtime_sec: float | None
+    avg_ingest_runtime_sec: Optional[float]
+    min_ingest_runtime_sec: Optional[float]
 
 
 def parse_plugin_settings(plugin_conf_path: Path) -> PluginSettings:
-    spool_dir: Path | None = None
-    debug_log_path: Path | None = None
+    spool_dir: Optional[Path] = None
+    debug_log_path: Optional[Path] = None
     flush_interval_sec = 1
 
     for raw_line in plugin_conf_path.read_text(encoding="utf-8").splitlines():
@@ -116,8 +117,8 @@ def render_firebird_conf(base_content: str, enable_plugin: bool, plugin_name: st
 def _run_command(
     command: list[str],
     *,
-    cwd: Path | None = None,
-    input_text: str | None = None,
+    cwd: Optional[Path] = None,
+    input_text: Optional[str] = None,
     capture_output: bool = True,
     check: bool = True,
 ) -> subprocess.CompletedProcess[str]:
@@ -131,7 +132,7 @@ def _run_command(
     )
 
 
-def _build_sudo_prefix(sudo_command: str | None) -> list[str]:
+def _build_sudo_prefix(sudo_command: Optional[str]) -> list[str]:
     if not sudo_command:
         return []
     return shlex.split(sudo_command)
@@ -144,7 +145,7 @@ class FirebirdBenchmarkRunner:
         self.python_executable = sys.executable
         self.workspace_root = Path(args.workspace_root).resolve()
         self.workspace_root.mkdir(parents=True, exist_ok=True)
-        self.run_id = datetime.now(tz=UTC).strftime("%Y%m%dT%H%M%SZ")
+        self.run_id = datetime.now(tz=timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         self.results_dir = self.repo_root / "bench" / "results"
         self.results_dir.mkdir(parents=True, exist_ok=True)
         self.firebird_conf_path = Path(args.firebird_conf)
@@ -180,7 +181,7 @@ class FirebirdBenchmarkRunner:
 
     def run(self) -> dict[str, object]:
         self.preflight()
-        started_at = datetime.now(tz=UTC)
+        started_at = datetime.now(tz=timezone.utc)
         calibration_rounds = self.args.calibration_rounds
         benchmark_rounds = calibration_rounds
         results: dict[str, ModeResult] = {}
@@ -230,10 +231,10 @@ class FirebirdBenchmarkRunner:
             self._prepare_iteration(artifacts=artifacts)
 
             sql_runtime_sec = self._run_client_scripts(artifacts=artifacts, label=f"{mode}-iter-{iteration}")
-            ingest_runtime_sec: float | None = None
+            ingest_runtime_sec: Optional[float] = None
             spool_file_count = self._count_spool_files()
-            observed_calls: int | None = None
-            distinct_procs: int | None = None
+            observed_calls: Optional[int] = None
+            distinct_procs: Optional[int] = None
             valid = True
             note = "ok"
 
@@ -481,7 +482,7 @@ class FirebirdBenchmarkRunner:
             [*self.sudo_prefix, "systemctl", "restart", self.service_name],
             [*self.sudo_prefix, "service", self.service_name, "restart"],
         ]
-        last_error: RuntimeError | None = None
+        last_error: Optional[RuntimeError] = None
         for command in restart_commands:
             try:
                 _run_command(command, cwd=self.repo_root)
@@ -503,7 +504,7 @@ class FirebirdBenchmarkRunner:
     ) -> dict[str, object]:
         without_plugin = results.get("without_plugin")
         with_plugin = results.get("with_plugin")
-        comparison: dict[str, float | None] = {
+        comparison: Dict[str, Optional[float]] = {
             "sql_delta_sec": None,
             "sql_delta_pct": None,
             "ingest_delta_sec": None,
@@ -607,7 +608,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     args = _build_parser().parse_args(argv)
     runner = FirebirdBenchmarkRunner(args)
     runner.run()

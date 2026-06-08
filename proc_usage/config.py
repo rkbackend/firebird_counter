@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-@dataclass(slots=True)
+@dataclass
 class ServiceConfig:
     spool_dir: Path
     sqlite_db_path: Path
@@ -19,4 +19,3 @@ def load_service_config(path: Path) -> ServiceConfig:
         sqlite_db_path=Path(payload["sqlite_db_path"]),
         poll_interval_sec=int(payload.get("poll_interval_sec", 5)),
     )
-

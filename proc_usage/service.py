@@ -8,7 +8,7 @@ from proc_usage.spool import SpoolIngestor
 from proc_usage.storage import SQLiteUsageStorage
 
 
-@dataclass(slots=True)
+@dataclass
 class ProcUsageService:
     config: ServiceConfig
     storage: SQLiteUsageStorage

@@ -1,0 +1,23 @@
+[Unit]
+Description=Firebird procedure usage ingestion service
+After=local-fs.target
+
+[Service]
+Type=simple
+User=firebird
+Group=firebird
+WorkingDirectory=/var/lib/firebird-proc-usage
+Environment=PYTHONUNBUFFERED=1
+ExecStartPre=/usr/bin/proc-usage init-db --config /etc/firebird-proc-usage/python_service.json
+ExecStart=/usr/bin/proc-usage serve --config /etc/firebird-proc-usage/python_service.json
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/firebird-proc-usage
+UMask=0007
+
+[Install]
+WantedBy=multi-user.target

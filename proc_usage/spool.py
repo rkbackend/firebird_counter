@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Callable, Iterable, Iterator
 
 
-@dataclass(slots=True)
+@dataclass
 class SpoolRecord:
     ts: datetime
     db: str
@@ -15,14 +15,14 @@ class SpoolRecord:
     delta: int
 
 
-@dataclass(slots=True, frozen=True)
+@dataclass(frozen=True)
 class SpoolFileState:
     path: str
     size_bytes: int
     mtime_ns: int
 
 
-@dataclass(slots=True)
+@dataclass
 class ClaimedSpoolFile:
     path: Path
     state: SpoolFileState

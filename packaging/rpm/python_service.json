@@ -1,0 +1,5 @@
+{
+  "spool_dir": "/var/lib/firebird-proc-usage/spool",
+  "sqlite_db_path": "/var/lib/firebird-proc-usage/proc_usage.sqlite3",
+  "poll_interval_sec": 5
+}
