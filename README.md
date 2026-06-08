@@ -97,7 +97,24 @@ yum install -y rpm-build gcc-c++ cmake make \
   pyproject-rpm-macros systemd-rpm-macros firebird-devel
 ```
 
-Подготовьте source tarball, чтобы корневой каталог внутри архива назывался `firebird-proc-usage-0.1.0/`, затем соберите RPM:
+Подготовьте `rpmbuild`-дерево и source tarball так, чтобы корневой каталог внутри архива назывался `firebird-proc-usage-0.1.0/`:
+
+```bash
+mkdir -p ~/rpmbuild/SOURCES ~/rpmbuild/SPECS
+
+git archive --format=tar.gz \
+  --prefix=firebird-proc-usage-0.1.0/ \
+  HEAD > ~/rpmbuild/SOURCES/firebird-proc-usage-0.1.0.tar.gz
+```
+
+Скопируйте spec-файл в `SPECS` и соберите RPM:
+
+```bash
+cp packaging/rpm/firebird-proc-usage.spec ~/rpmbuild/SPECS/
+rpmbuild -bb ~/rpmbuild/SPECS/firebird-proc-usage.spec --with firebird_plugin
+```
+
+То же самое можно сделать без копирования spec-файла, прямо из репозитория:
 
 ```bash
 rpmbuild -bb packaging/rpm/firebird-proc-usage.spec --with firebird_plugin
@@ -116,12 +133,52 @@ yum install -y ~/rpmbuild/RPMS/*/firebird-proc-usage-0.1.0-1*.rpm
 yum install -y ~/rpmbuild/RPMS/*/firebird-proc-usage-firebird-plugin-0.1.0-1*.rpm
 ```
 
-Что ставится по умолчанию:
+## Куда Пакет Кладет Файлы
 
-- collector config: `/etc/firebird-proc-usage/python_service.json`
-- plugin config: `/etc/firebird-proc-usage/firebird/proc_usage_plugin.conf`
-- spool и SQLite: `/var/lib/firebird-proc-usage/`
-- systemd service: `proc-usage.service`
+По умолчанию RPM раскладывает файлы так:
+
+- Python-код пакета `proc_usage` - в системный `site-packages` через `%pyproject_install`
+- CLI-обертка `proc-usage` - в `/usr/bin/proc-usage`
+- systemd unit - в `/usr/lib/systemd/system/proc-usage.service`
+- collector config - в `/etc/firebird-proc-usage/python_service.json`
+- plugin config - в `/etc/firebird-proc-usage/firebird/proc_usage_plugin.conf`
+- sample-конфиги Firebird - в `/etc/firebird-proc-usage/firebird/`
+- spool и SQLite - в `/var/lib/firebird-proc-usage/`
+- shared library плагина - в `%{_libdir}/firebird/plugins/libproc_usage_trace.so`
+
+Это соответствует текущим макросам и install-правилам в [packaging/rpm/firebird-proc-usage.spec](/home/j8r/code/firebird_counter/packaging/rpm/firebird-proc-usage.spec).
+
+Сервис запускается с такими основными путями:
+
+- `WorkingDirectory=/var/lib/firebird-proc-usage`
+- `ExecStart=/usr/bin/proc-usage serve --config /etc/firebird-proc-usage/python_service.json`
+- `ReadWritePaths=/var/lib/firebird-proc-usage`
+
+См. [packaging/rpm/proc-usage.service](/home/j8r/code/firebird_counter/packaging/rpm/proc-usage.service).
+
+## Как Поменять Пути Установки
+
+Если нужно разложить файлы по другим каталогам, обычно меняют не код, а `spec`-макросы и production-конфиги.
+
+Что менять в `spec`:
+
+- `%global app_conf_dir` - корень для конфигов collector
+- `%global firebird_conf_dir` - каталог для конфигов Firebird/plugin
+- `%global firebird_plugins_dir` - каталог, куда ставится `libproc_usage_trace.so`
+
+Что менять в конфигурации:
+
+- [packaging/rpm/python_service.json](/home/j8r/code/firebird_counter/packaging/rpm/python_service.json) - `spool_dir`, `sqlite_db_path`
+- [packaging/rpm/proc_usage_plugin.conf](/home/j8r/code/firebird_counter/packaging/rpm/proc_usage_plugin.conf) - `spool_dir`, `debug_log_path`
+- [packaging/rpm/proc-usage.service](/home/j8r/code/firebird_counter/packaging/rpm/proc-usage.service) - `WorkingDirectory`, `ExecStartPre`, `ExecStart`, `ReadWritePaths`
+
+Пример: если хотите хранить state не в `/var/lib/firebird-proc-usage`, а в `/opt/firebird-proc-usage/var`, нужно согласованно поменять:
+
+- `sqlite_db_path` и `spool_dir` в `python_service.json`
+- `spool_dir` и `debug_log_path` в `proc_usage_plugin.conf`
+- `WorkingDirectory` и `ReadWritePaths` в `proc-usage.service`
+
+Python-код лучше оставлять в стандартном `site-packages`. Формально можно переопределять install scheme RPM-макросами, но для системного пакета это обычно только усложняет поддержку.
 
 После установки останется:
 
