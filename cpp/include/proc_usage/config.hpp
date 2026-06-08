@@ -7,18 +7,27 @@
 
 namespace proc_usage {
 
+// Настройки времени выполнения для коллектора и плагина.
+// Структура специально сделана простой, потому что она загружается либо
+// из небольшого текстового конфига, либо из настроек плагина Firebird.
 struct CollectorConfig {
+    // Как часто разрешено сбрасывать накопленные счётчики.
     std::chrono::seconds flush_interval {30};
+    // Каталог, куда записываются пакетные JSONL-файлы.
     std::filesystem::path spool_dir;
+    // Необязательный диагностический лог, который использует плагин Firebird.
     std::filesystem::path debug_log_path;
+    // Если список не пуст, будут учитываться только базы, путь которых содержит
+    // один из этих фрагментов.
     std::vector<std::string> include_databases;
+    // Базы, путь которых содержит один из этих фрагментов, всегда игнорируются.
     std::vector<std::string> exclude_databases;
 };
 
-// Loads a tiny "key = value" config file for the collector.
+// Загружает простой конфиг коллектора в формате "key = value".
 CollectorConfig load_collector_config_from_file(const std::filesystem::path& path);
 
-// Returns true when a database path should be tracked according to include/exclude filters.
+// Возвращает true, если путь к базе нужно учитывать согласно include/exclude фильтрам.
 bool database_matches_filters(
     const std::string& database_path,
     const std::vector<std::string>& include_filters,

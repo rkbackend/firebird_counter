@@ -50,6 +50,9 @@ constexpr const char* kEnvConfigPath = "PROC_USAGE_PLUGIN_CONFIG";
 template <typename T>
 class AutoReleasePtr {
 public:
+    // Небольшая RAII-обёртка для интерфейсов Firebird,
+    // которые освобождаются вручную через release().
+    // Она не даёт утечь объектам SDK при раннем выходе или исключении.
     explicit AutoReleasePtr(T* value = nullptr)
         : value_(value)
     {
@@ -109,11 +112,13 @@ class ReferenceCountedMixin {
 public:
     void addRef()
     {
+        // Объекты плагина Firebird живут через внутренний reference counting.
         ref_count_.fetch_add(1, std::memory_order_relaxed);
     }
 
     int release()
     {
+        // Когда исчезает последняя ссылка, объект уничтожает сам себя.
         const int remaining = ref_count_.fetch_sub(1, std::memory_order_acq_rel) - 1;
         if (remaining == 0) {
             delete_self();
@@ -134,6 +139,7 @@ class PluginBaseState {
 public:
     void setOwner(IReferenceCounted* owner)
     {
+        // Пока эта фабрика или плагин ссылается на owner, не даём ему уничтожиться.
         if (owner != nullptr) {
             owner->addRef();
         }
@@ -165,6 +171,7 @@ private:
 
 std::string trim_copy(std::string_view text)
 {
+    // Общая утилита для разбора строковых значений из конфига.
     std::size_t start = 0;
     std::size_t end = text.size();
 
@@ -181,6 +188,7 @@ std::string trim_copy(std::string_view text)
 
 std::vector<std::string> split_filter_list(std::string_view text)
 {
+    // В конфиге Firebird разделителем может быть и ';', и ',' — поддерживаем оба варианта.
     std::vector<std::string> filters;
     std::string current;
 
@@ -207,6 +215,8 @@ std::vector<std::string> split_filter_list(std::string_view text)
 
 std::optional<std::string> getenv_non_empty(const char* name)
 {
+    // В разных окружениях развёртывания настройки плагина может быть удобно
+    // переопределять через переменные окружения.
     const char* value = std::getenv(name);
     if (value == nullptr || *value == '\0') {
         return std::nullopt;
@@ -217,6 +227,7 @@ std::optional<std::string> getenv_non_empty(const char* name)
 
 std::string get_entry_value(IConfig* config, ThrowStatusWrapper* status, const char* key)
 {
+    // Читает одно именованное значение из блока конфигурации плагина Firebird.
     AutoReleasePtr<IConfigEntry> entry(config->find(status, key));
     if (!entry) {
         return {};
@@ -228,6 +239,7 @@ std::string get_entry_value(IConfig* config, ThrowStatusWrapper* status, const c
 
 CollectorConfig default_config()
 {
+    // Безопасные значения по умолчанию на случай, если плагин загружен без явного конфига.
     CollectorConfig config;
     config.spool_dir = std::filesystem::temp_directory_path() / "firebird_proc_usage_spool";
     config.debug_log_path = std::filesystem::temp_directory_path() / "proc_usage_trace_debug.log";
@@ -239,10 +251,15 @@ CollectorConfig load_collector_config_from_plugin(
     IPluginConfig* plugin_config
 )
 {
+    // Наивысший приоритет у внешнего конфиг-файла, путь к которому задан
+    // через переменную окружения.
+    // Это удобно, если при развёртывании не хочется пересобирать настройки плагина.
     if (const auto env_path = getenv_non_empty(kEnvConfigPath)) {
         return load_collector_config_from_file(*env_path);
     }
 
+    // Иначе начинаем со значений по умолчанию и затем переопределяем их
+    // настройками из конфигурации плагина Firebird.
     CollectorConfig config = default_config();
     if (plugin_config == nullptr) {
         return config;
@@ -253,6 +270,8 @@ CollectorConfig load_collector_config_from_plugin(
         return config;
     }
 
+    // Каждая настройка здесь необязательна: значения по умолчанию
+    // заменяются только непустыми значениями.
     if (const std::string spool_dir = get_entry_value(raw_config.get(), status, "spool_dir"); !spool_dir.empty()) {
         config.spool_dir = spool_dir;
     }
@@ -278,6 +297,7 @@ CollectorConfig load_collector_config_from_plugin(
 
 std::string format_debug_timestamp(std::chrono::system_clock::time_point now)
 {
+    // Формат совпадает с timestamp в spool-файлах, чтобы их было легче сопоставлять с логами.
     const std::time_t raw_time = std::chrono::system_clock::to_time_t(now);
     const auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(
         now.time_since_epoch()
@@ -309,13 +329,14 @@ public:
 
     void write(std::string_view message) const
     {
+        // Пустой путь означает, что отладочный лог фактически отключён.
         if (path_.empty()) {
             return;
         }
 
         std::lock_guard<std::mutex> guard(mutex_);
-        // Firebird may call trace hooks from different worker threads, so we serialize
-        // appends to keep the diagnostic log readable.
+        // Firebird может вызывать trace-хуки из разных рабочих потоков,
+        // поэтому дозапись в лог сериализуем, чтобы он оставался читаемым.
         std::error_code error;
         const auto parent = path_.parent_path();
         if (!parent.empty()) {
@@ -349,14 +370,17 @@ public:
           collector_(std::move(config), writer_),
           bridge_(collector_)
     {
-        // We keep one collector per trace plugin instance so counters stay local to the
-        // Firebird process handling the traced attachment.
+        // Для каждого экземпляра trace-плагина держим свой коллектор,
+        // чтобы счётчики оставались локальными для процесса Firebird,
+        // который обслуживает конкретное подключение.
         debug_log_->write("trace plugin instance created; spool_dir=" + spool_dir_.string());
     }
 
     ~ProcUsageTracePlugin() override
     {
         try {
+            // При завершении пытаемся сделать финальный сброс,
+            // чтобы не потерять последние накопленные счётчики.
             debug_log_->write("trace plugin shutdown flush requested");
             collector_.flush_now();
             debug_log_->write("trace plugin shutdown flush completed");
@@ -383,6 +407,7 @@ public:
 
     const char* trace_get_error() override
     {
+        // Firebird может запросить у плагина человекочитаемое описание последней ошибки.
         if (!last_error_.empty()) {
             debug_log_->write("trace_get_error requested: " + last_error_);
         }
@@ -397,6 +422,8 @@ public:
 
     FB_BOOLEAN trace_detach(ITraceDatabaseConnection*, FB_BOOLEAN) override
     {
+        // Подключение закрывается, поэтому это удобный момент
+        // для сброса накопленной статистики.
         debug_log_->write("trace_detach; flushing counters");
         return flush_with_error_capture();
     }
@@ -408,6 +435,8 @@ public:
 
     FB_BOOLEAN trace_transaction_end(ITraceDatabaseConnection*, ITraceTransaction*, FB_BOOLEAN, FB_BOOLEAN, unsigned) override
     {
+        // Дополнительно делаем сброс на границах транзакций,
+        // чтобы даже долгоживущие подключения регулярно отдавали данные.
         return flush_with_error_capture();
     }
 
@@ -419,6 +448,9 @@ public:
         unsigned
     ) override
     {
+        // В некоторых trace-режимах Firebird вызывает этот хук дважды:
+        // до и после выполнения.
+        // Учитываем только событие "started", чтобы не было двойного подсчёта.
         if (!started || connection == nullptr || procedure == nullptr) {
             return true;
         }
@@ -427,8 +459,8 @@ public:
             const char* database_name = connection->getDatabaseName();
             const char* procedure_name = procedure->getProcName();
 
-            // The bridge owns the "count one procedure call" policy so the Firebird hook
-            // stays thin and easy to debug.
+            // Правило "как именно считать один вызов процедуры" живёт в bridge_,
+            // поэтому сам trace-хук остаётся коротким и его проще отлаживать.
             bridge_.on_procedure_execute(
                 database_name == nullptr ? std::string_view() : std::string_view(database_name),
                 procedure_name == nullptr ? std::string_view() : std::string_view(procedure_name)
@@ -510,6 +542,8 @@ public:
 
     FB_BOOLEAN trace_service_detach(Firebird::ITraceServiceConnection*, unsigned) override
     {
+        // Для service-подключений это тоже может быть последняя возможность
+        // опубликовать накопленные счётчики.
         debug_log_->write("trace_service_detach; flushing counters");
         return flush_with_error_capture();
     }
@@ -538,8 +572,9 @@ private:
     FB_BOOLEAN flush_with_error_capture()
     {
         try {
-            // Logging the pending counter sizes makes it obvious whether missing spool
-            // files come from absent callbacks or from filesystem issues during flush.
+            // Логируем объём накопленных данных, чтобы было проще понять,
+            // почему не появились spool-файлы:
+            // из-за отсутствия колбэков или из-за проблем записи на диск.
             const std::size_t pending_entries = collector_.pending_entry_count();
             const std::uint64_t pending_calls = collector_.pending_total_calls();
             debug_log_->write(
@@ -564,11 +599,18 @@ private:
         }
     }
 
+    // Общий отладочный лог для этого экземпляра плагина.
     std::shared_ptr<DebugLog> debug_log_;
+    // Хранится в основном для логов и удобства просмотра;
+    // writer тоже хранит тот же путь у себя.
     std::filesystem::path spool_dir_;
+    // Реализация вывода, которая создаёт пакетные JSONL-файлы.
     std::shared_ptr<JsonlSpoolWriter> writer_;
+    // Накопитель счётчиков вызовов процедур в памяти.
     UsageCollector collector_;
+    // Адаптер, который превращает trace-данные Firebird в вызовы коллектора.
     FirebirdTraceBridge bridge_;
+    // Текст последней ошибки, который можно вернуть обратно Firebird.
     std::string last_error_;
 };
 
@@ -609,7 +651,8 @@ public:
 
     ISC_UINT64 trace_needs() override
     {
-        // We ask only for procedure execution plus lifecycle events used to flush buffered counters.
+        // Просим у Firebird только события вызова процедур
+        // и события жизненного цикла, которые нужны для сброса счётчиков.
         return (ISC_UINT64{1} << ITraceFactory::TRACE_EVENT_PROC_EXECUTE) |
                (ISC_UINT64{1} << ITraceFactory::TRACE_EVENT_TRANSACTION_END) |
                (ISC_UINT64{1} << ITraceFactory::TRACE_EVENT_DETACH) |
@@ -618,6 +661,7 @@ public:
 
     ITracePlugin* trace_create(ThrowStatusWrapper*, ITraceInitInfo*) override
     {
+        // Firebird вызывает это, когда ему нужен реальный экземпляр trace-плагина для сессии.
         debug_log_->write("trace_create invoked");
         return new ProcUsageTracePlugin(config_);
     }
@@ -637,6 +681,7 @@ class ProcUsagePluginFactory final
 public:
     IPluginBase* createPlugin(ThrowStatusWrapper* status, IPluginConfig* factory_parameter) override
     {
+        // Точка входа фабрики, которую Firebird вызывает во время создания плагина.
         const CollectorConfig config = load_collector_config_from_plugin(status, factory_parameter);
         DebugLog(config.debug_log_path).write(
             "createPlugin called; spool_dir=" + config.spool_dir.string()
@@ -666,6 +711,8 @@ ProcUsagePluginModule g_plugin_module;
 
 extern "C" FB_DLL_EXPORT void FB_PLUGIN_ENTRY_POINT(Firebird::IMaster* master)
 {
+    // Регистрируем модуль и фабрику trace-плагина в менеджере плагинов Firebird.
+    // После этого Firebird сможет создавать плагин по имени.
     auto* plugin_manager = master->getPluginManager();
     plugin_manager->registerModule(&proc_usage::firebird::g_plugin_module);
     plugin_manager->registerPluginFactory(

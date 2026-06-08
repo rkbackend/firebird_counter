@@ -8,6 +8,7 @@ namespace {
 
 std::string to_upper_copy(std::string_view text)
 {
+    // SQL без учёта регистра проще разбирать, если сначала привести его к верхнему регистру.
     std::string result(text);
     std::transform(result.begin(), result.end(), result.begin(), [](unsigned char ch) {
         return static_cast<char>(std::toupper(ch));
@@ -28,16 +29,21 @@ void FirebirdTraceBridge::on_procedure_execute(
     std::chrono::system_clock::time_point now
 )
 {
+    // Firebird может передать идентификатор с внешними кавычками или пробелами,
+    // поэтому сначала нормализуем имя, а потом используем его как часть ключа.
     const std::string normalized_name = trim_identifier(procedure_name);
     if (normalized_name.empty()) {
         return;
     }
 
+    // Превращаем string_view во владение std::string, потому что коллектор хранит данные у себя.
     collector_.record_call(std::string(database_path), normalized_name, now);
 }
 
 std::optional<std::string> FirebirdTraceBridge::extract_procedure_name_from_sql(std::string_view sql_text) const
 {
+    // Быстрый разбор самого типичного вида запроса:
+    // EXECUTE PROCEDURE MY_PROC(...)
     const std::string upper_sql = to_upper_copy(sql_text);
     const std::string prefix = "EXECUTE PROCEDURE ";
 
@@ -48,6 +54,7 @@ std::optional<std::string> FirebirdTraceBridge::extract_procedure_name_from_sql(
     const std::size_t start = prefix.size();
     std::size_t end = start;
 
+    // Имя процедуры заканчивается на первом пробеле или открывающей скобке.
     while (end < sql_text.size()) {
         const char ch = sql_text[end];
         if (std::isspace(static_cast<unsigned char>(ch)) || ch == '(') {
@@ -69,6 +76,7 @@ std::string FirebirdTraceBridge::trim_identifier(std::string_view text)
     std::size_t start = 0;
     std::size_t end = text.size();
 
+    // Сначала убираем пробелы по краям.
     while (start < end && std::isspace(static_cast<unsigned char>(text[start]))) {
         ++start;
     }
@@ -77,6 +85,8 @@ std::string FirebirdTraceBridge::trim_identifier(std::string_view text)
         --end;
     }
 
+    // В Firebird SQL идентификаторы могут быть заключены в двойные кавычки.
+    // Если кавычки обрамляют весь токен, снимаем их.
     if (end > start && text[start] == '"' && text[end - 1] == '"') {
         ++start;
         --end;
@@ -86,4 +96,3 @@ std::string FirebirdTraceBridge::trim_identifier(std::string_view text)
 }
 
 }  // namespace proc_usage::firebird
-

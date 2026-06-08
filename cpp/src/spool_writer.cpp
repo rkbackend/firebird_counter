@@ -12,6 +12,8 @@ namespace {
 
 std::string format_timestamp(std::chrono::system_clock::time_point timestamp)
 {
+    // Преобразуем C++ time_point в строку UTC, например:
+    // 2026-06-08T10:11:12.345Z
     const std::time_t raw_time = std::chrono::system_clock::to_time_t(timestamp);
     const auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(
         timestamp.time_since_epoch()
@@ -47,8 +49,11 @@ bool JsonlSpoolWriter::write_records(const std::vector<FlushRecord>& records)
         return false;
     }
 
+    // Убеждаемся, что целевой каталог существует, прежде чем создавать в нём файлы.
     std::filesystem::create_directories(spool_dir_);
 
+    // Сначала пишем во временный файл, чтобы читатели никогда не увидели
+    // недописанный пакет.
     const auto temp_path = build_temp_path();
     const auto final_path = build_final_path();
 
@@ -59,8 +64,9 @@ bool JsonlSpoolWriter::write_records(const std::vector<FlushRecord>& records)
         }
 
         for (const auto& record : records) {
-            // Each line is independent JSON so the Python service can stream it and
-            // recover partially processed batches without loading the entire file at once.
+            // Каждая строка — это отдельный JSON-объект, поэтому Python-сервис
+            // может читать файл потоково и восстанавливаться после частичной обработки,
+            // не загружая весь пакет целиком в память.
             output << "{\"ts\":\"" << format_timestamp(record.timestamp)
                    << "\",\"db\":\"" << escape_json_string(record.database)
                    << "\",\"proc\":\"" << escape_json_string(record.procedure)
@@ -69,6 +75,8 @@ bool JsonlSpoolWriter::write_records(const std::vector<FlushRecord>& records)
         }
     }
 
+    // Атомарный rename — это момент "публикации": потребители должны видеть
+    // только уже готовый итоговый файл.
     std::filesystem::rename(temp_path, final_path);
     return true;
 }
@@ -78,6 +86,8 @@ std::string JsonlSpoolWriter::escape_json_string(const std::string& input)
     std::ostringstream output;
 
     for (const char ch : input) {
+        // Экранируем только те символы, которые могут сломать структуру
+        // или смысл JSON.
         switch (ch) {
         case '\\':
             output << "\\\\";
@@ -105,6 +115,8 @@ std::string JsonlSpoolWriter::escape_json_string(const std::string& input)
 
 std::filesystem::path JsonlSpoolWriter::build_temp_path() const
 {
+    // Комбинируем текущее время со случайной добавкой, чтобы снизить риск
+    // совпадения имён, если несколько процессов пишут в один каталог.
     const auto now = std::chrono::system_clock::now().time_since_epoch().count();
     std::random_device random_device;
     const auto noise = random_device();
@@ -113,6 +125,8 @@ std::filesystem::path JsonlSpoolWriter::build_temp_path() const
 
 std::filesystem::path JsonlSpoolWriter::build_final_path() const
 {
+    // Для итогового файла используется та же стратегия уникальности,
+    // только без суффикса ".tmp".
     const auto now = std::chrono::system_clock::now().time_since_epoch().count();
     std::random_device random_device;
     const auto noise = random_device();

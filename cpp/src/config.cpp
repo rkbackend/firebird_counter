@@ -11,6 +11,7 @@ namespace {
 
 std::string trim(std::string value)
 {
+    // Удаляем пробелы в начале и в конце строки прямо в этом объекте.
     auto not_space = [](unsigned char ch) { return !std::isspace(ch); };
     value.erase(value.begin(), std::find_if(value.begin(), value.end(), not_space));
     value.erase(std::find_if(value.rbegin(), value.rend(), not_space).base(), value.end());
@@ -19,6 +20,8 @@ std::string trim(std::string value)
 
 std::vector<std::string> split_list(const std::string& value)
 {
+    // В конфиге элементы списка разделяются через ';':
+    // include_databases = db1;db2;db3
     std::vector<std::string> parts;
     std::stringstream stream(value);
     std::string part;
@@ -50,10 +53,13 @@ CollectorConfig load_collector_config_from_file(const std::filesystem::path& pat
         ++line_number;
         line = trim(line);
 
+        // Пропускаем пустые строки и комментарии, чтобы конфиг оставался удобным для человека.
         if (line.empty() || line.starts_with('#')) {
             continue;
         }
 
+        // Каждая непустая строка без комментария должна иметь вид:
+        // key = value
         const auto separator = line.find('=');
         if (separator == std::string::npos) {
             throw std::runtime_error("Invalid config line " + std::to_string(line_number) + ": " + line);
@@ -78,6 +84,7 @@ CollectorConfig load_collector_config_from_file(const std::filesystem::path& pat
             config.exclude_databases = split_list(value);
         }
         else {
+            // Неизвестные ключи считаем ошибкой, чтобы сразу ловить опечатки.
             throw std::runtime_error("Unknown config key: " + key);
         }
     }
@@ -95,16 +102,19 @@ bool database_matches_filters(
     const std::vector<std::string>& exclude_filters
 )
 {
+    // Правила exclude имеют приоритет и срабатывают сразу.
     for (const auto& excluded : exclude_filters) {
         if (!excluded.empty() && database_path.find(excluded) != std::string::npos) {
             return false;
         }
     }
 
+    // Если include-правил нет, значит учитываем всё, что не было исключено.
     if (include_filters.empty()) {
         return true;
     }
 
+    // Если include-правила есть, должен совпасть хотя бы один шаблон.
     for (const auto& included : include_filters) {
         if (!included.empty() && database_path.find(included) != std::string::npos) {
             return true;
