@@ -39,9 +39,9 @@ flowchart LR
     collector[collector.cpp]
     writer[spool_writer.cpp]
     spool["spool/*.jsonl"]
-    service["proc_usage.service"]
-    storage[storage.py]
-    sqlite[SQLite]
+    svc["proc_usage.service"]
+    store[storage.py]
+    sdb[SQLite]
 
     fb -->|завершение процедуры или SQL| hooks
     hooks --> entry
@@ -49,10 +49,10 @@ flowchart LR
     bridge -->|нормализация имени процедуры\nили классификация SQL| collector
     collector -->|hourly aggregate:\ncount, total_time_ms,\nmin_time_ms, max_time_ms| writer
     writer --> spool
-    spool -->|ingest_pending_files()| service
-    service -->|apply_spool_file()| storage
-    storage -->|upsert агрегатов по UTC-часу| sqlite
-    sqlite -.->|raw-времена не хранятся,\nтолько агрегаты| storage
+    spool -->|ingest_pending_files()| svc
+    svc -->|apply_spool_file()| store
+    store -->|upsert агрегатов по UTC-часу| sdb
+    sdb -.->|raw-времена не хранятся,\nтолько агрегаты| store
 ```
 
 Эта схема показывает границы между Firebird, `C++`-плагином и Python-сервисом.
