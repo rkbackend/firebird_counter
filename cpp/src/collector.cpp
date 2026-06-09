@@ -10,6 +10,8 @@ namespace {
 
 std::string format_usage_hour(std::chrono::system_clock::time_point timestamp)
 {
+    // Все события группируются по часу в UTC, чтобы статистика не зависела
+    // от локальной таймзоны конкретного сервера.
     const std::time_t raw_time = std::chrono::system_clock::to_time_t(timestamp);
     std::tm utc_time {};
 #if defined(_WIN32)
@@ -39,6 +41,7 @@ void UsageAggregate::observe(
     std::chrono::system_clock::time_point observed_at
 )
 {
+    // Новое событие сразу вливается в уже накопленные агрегаты.
     total_time_ms += duration_ms;
     min_time_ms = count == 0 ? duration_ms : std::min(min_time_ms, duration_ms);
     max_time_ms = count == 0 ? duration_ms : std::max(max_time_ms, duration_ms);
@@ -61,6 +64,8 @@ void UsageCollector::record_usage(
     std::chrono::system_clock::time_point now
 )
 {
+    // Пустые имена и базы, не прошедшие фильтры include/exclude,
+    // не должны попадать в статистику.
     if (name.empty() || !should_track_database(database_path)) {
         return;
     }
@@ -68,10 +73,12 @@ void UsageCollector::record_usage(
     const std::string usage_hour = format_usage_hour(now);
 
     {
+        // Под mutex только быстрое обновление in-memory структуры.
         std::lock_guard<std::mutex> guard(mutex_);
         aggregates_[UsageKey{kind, usage_hour, database_path, name}].observe(duration_ms, now);
     }
 
+    // Проверку времени flush делаем уже вне критической секции.
     flush_if_due(now);
 }
 
@@ -79,6 +86,7 @@ bool UsageCollector::flush_if_due(std::chrono::system_clock::time_point now)
 {
     {
         std::lock_guard<std::mutex> guard(mutex_);
+        // Пока не истёк интервал, просто продолжаем копить данные в памяти.
         if (now - last_flush_at_ < config_.flush_interval) {
             return false;
         }
@@ -93,11 +101,15 @@ bool UsageCollector::flush_now(std::chrono::system_clock::time_point now)
 
     {
         std::lock_guard<std::mutex> guard(mutex_);
+        // Даже если данных нет, обновляем last_flush_at_, чтобы не пытаться
+        // бесконечно выполнять пустой flush на каждом следующем событии.
         if (aggregates_.empty()) {
             last_flush_at_ = now;
             return false;
         }
 
+        // Забираем весь текущий снимок и сразу освобождаем основной контейнер.
+        // Это позволяет новым trace-событиям копиться параллельно с записью на диск.
         snapshot = detach_pending_aggregates_unlocked();
         last_flush_at_ = now;
     }
@@ -108,11 +120,14 @@ bool UsageCollector::flush_now(std::chrono::system_clock::time_point now)
     }
 
     if (spool_writer_ && spool_writer_->write_records(records)) {
+        // Пакет успешно записан во внешний spool, больше делать ничего не нужно.
         return true;
     }
 
     {
         std::lock_guard<std::mutex> guard(mutex_);
+        // Если запись не удалась, возвращаем snapshot обратно.
+        // Так мы не теряем статистику и сможем повторить flush позже.
         for (const auto& [key, aggregate] : snapshot) {
             auto& current = aggregates_[key];
             if (current.count == 0) {
@@ -133,6 +148,7 @@ bool UsageCollector::flush_now(std::chrono::system_clock::time_point now)
 
 std::size_t UsageCollector::pending_entry_count() const
 {
+    // Это число уникальных агрегатных ключей, а не количество вызовов.
     std::lock_guard<std::mutex> guard(mutex_);
     return aggregates_.size();
 }
@@ -143,6 +159,7 @@ std::uint64_t UsageCollector::pending_total_calls() const
 
     std::uint64_t total = 0;
     for (const auto& [_, aggregate] : aggregates_) {
+        // Здесь суммируется count каждого агрегата, чтобы понять общий объём.
         total += aggregate.count;
     }
 
@@ -160,6 +177,7 @@ bool UsageCollector::should_track_database(const std::string& database_path) con
 
 UsageCollector::AggregateMap UsageCollector::detach_pending_aggregates_unlocked()
 {
+    // swap позволяет вынуть весь контейнер почти бесплатно, без копирования.
     AggregateMap detached;
     detached.swap(aggregates_);
     return detached;
@@ -167,6 +185,7 @@ UsageCollector::AggregateMap UsageCollector::detach_pending_aggregates_unlocked(
 
 std::vector<FlushRecord> UsageCollector::build_records(const AggregateMap& aggregates) const
 {
+    // Преобразуем hash-map в плоский список, удобный для JSONL-сериализации.
     std::vector<FlushRecord> records;
     records.reserve(aggregates.size());
 

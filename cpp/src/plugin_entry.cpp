@@ -218,6 +218,8 @@ std::vector<std::string> split_filter_list(std::string_view text)
 
 bool parse_bool_value(std::string_view raw_value)
 {
+    // Разрешаем несколько привычных форматов, чтобы настройки плагина
+    // можно было задавать в том виде, который удобен окружению.
     std::string value = trim_copy(raw_value);
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
         return static_cast<char>(std::tolower(ch));
@@ -260,6 +262,8 @@ std::string get_entry_value(IConfig* config, ThrowStatusWrapper* status, const c
 
 std::uint64_t read_duration_ms(PerformanceInfo* perf)
 {
+    // В trace API длительность приходит через PerformanceInfo::pin_time.
+    // Если структуры нет или значение некорректно, считаем длительность нулевой.
     if (perf == nullptr || perf->pin_time < 0) {
         return 0;
     }
@@ -548,6 +552,8 @@ public:
         unsigned
     ) override
     {
+        // SQL-статистика включается отдельно. И, как у процедур, meaningful
+        // timing доступен только на finish-событии, а не на старте.
         if (!enable_sql_stats_ || started || connection == nullptr || statement == nullptr) {
             return true;
         }
@@ -726,6 +732,8 @@ public:
     {
         // Просим у Firebird только события вызова процедур
         // и события жизненного цикла, которые нужны для сброса счётчиков.
+        // Это уменьшает лишний trace-шум и не заставляет плагин получать
+        // те события, которые он всё равно не обрабатывает.
         return (ISC_UINT64{1} << ITraceFactory::TRACE_EVENT_PROC_EXECUTE) |
                (ISC_UINT64{1} << ITraceFactory::TRACE_EVENT_TRANSACTION_END) |
                (ISC_UINT64{1} << ITraceFactory::TRACE_EVENT_DETACH) |
@@ -768,10 +776,12 @@ class ProcUsagePluginModule final
 public:
     void doClean() override
     {
+        // Глобальных ресурсов, требующих явной очистки на уровне модуля, нет.
     }
 
     void threadDetach() override
     {
+        // Потокоспецифичного состояния тоже нет: всё важное живёт в экземплярах.
     }
 };
 

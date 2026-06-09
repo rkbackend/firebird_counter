@@ -8,16 +8,22 @@ from proc_usage.spool import SpoolFileState, SpoolRecord, group_records
 
 
 class SQLiteUsageStorage:
+    """Слой доступа к SQLite для почасовых агрегатов по процедурам и SQL."""
+
     def __init__(self, database_path: Path) -> None:
         self.database_path = database_path
 
     def _connect(self) -> sqlite3.Connection:
+        """Открывает соединение с БД и настраивает строки как dict-like Row."""
+
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(self.database_path)
         connection.row_factory = sqlite3.Row
         return connection
 
     def initialize(self) -> None:
+        """Создаёт таблицы, если БД ещё пустая."""
+
         with self._connect() as connection:
             connection.execute(
                 """
@@ -34,6 +40,9 @@ class SQLiteUsageStorage:
                 )
                 """
             )
+            # Для процедур и SQL используются две отдельные таблицы с очень
+            # похожей схемой. Это упрощает запросы и не заставляет держать
+            # nullable-колонки под разные типы сущностей.
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS sql_usage_stats (
@@ -49,6 +58,9 @@ class SQLiteUsageStorage:
                 )
                 """
             )
+            # Здесь храним "отпечатки" уже применённых spool-файлов. Таблица
+            # нужна, чтобы один и тот же файл не увеличил статистику дважды,
+            # даже если сервис перезапустился или файл повторно появился.
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS processed_spool_files (
@@ -62,6 +74,8 @@ class SQLiteUsageStorage:
             )
 
     def apply_deltas(self, records: Iterable[SpoolRecord]) -> None:
+        """Применяет набор записей напрямую, без учёта spool-файла."""
+
         grouped = group_records(records)
         if not grouped:
             return
@@ -70,6 +84,8 @@ class SQLiteUsageStorage:
             self._apply_grouped_records(connection, grouped.values())
 
     def has_processed_spool_file(self, file_state: SpoolFileState) -> bool:
+        """Проверяет, применяли ли мы уже конкретный spool-файл."""
+
         with self._connect() as connection:
             row = connection.execute(
                 """
@@ -83,9 +99,14 @@ class SQLiteUsageStorage:
         return row is not None
 
     def apply_spool_file(self, file_state: SpoolFileState, records: Iterable[SpoolRecord]) -> bool:
+        """Атомарно применяет файл и помечает его как обработанный."""
+
         grouped = group_records(records)
 
         with self._connect() as connection:
+            # Сначала делаем защиту от дубля на уровне той же транзакции.
+            # Если запись о файле уже есть, значит его содержимое ранее было
+            # применено и второй раз статистику менять нельзя.
             existing = connection.execute(
                 """
                 SELECT 1
@@ -97,6 +118,8 @@ class SQLiteUsageStorage:
             if existing is not None:
                 return False
 
+            # Только после проверки обновляем агрегаты и фиксируем сам файл как
+            # обработанный. Так обе операции живут вместе и не расходятся.
             self._apply_grouped_records(connection, grouped.values())
             connection.execute(
                 """
@@ -109,6 +132,8 @@ class SQLiteUsageStorage:
         return True
 
     def top_usage(self, kind: str, limit: int = 10, usage_hour: Optional[str] = None) -> list[sqlite3.Row]:
+        """Возвращает самые "тяжёлые" агрегаты по вызовам и времени."""
+
         table_name, name_column = self._table_for_kind(kind)
         where_clause, parameters = self._hour_filter_clause(usage_hour)
         with self._connect() as connection:
@@ -122,6 +147,8 @@ class SQLiteUsageStorage:
                     total_time_ms,
                     min_time_ms,
                     max_time_ms,
+                    -- Среднее не храним отдельно, а считаем на чтении из уже
+                    -- накопленных total_time_ms и total_calls.
                     CASE
                         WHEN total_calls > 0 THEN CAST(total_time_ms AS REAL) / total_calls
                         ELSE 0
@@ -143,6 +170,8 @@ class SQLiteUsageStorage:
         database: Optional[str] = None,
         usage_hour: Optional[str] = None,
     ) -> list[sqlite3.Row]:
+        """Возвращает статистику по конкретной процедуре или виду SQL."""
+
         table_name, name_column = self._table_for_kind(kind)
         conditions = [f"{name_column} = ?"]
         parameters: list[object] = [name]
@@ -167,6 +196,8 @@ class SQLiteUsageStorage:
                     total_time_ms,
                     min_time_ms,
                     max_time_ms,
+                    -- Здесь среднее тоже вычисляется динамически, чтобы не
+                    -- хранить в таблице ещё одно производное поле.
                     CASE
                         WHEN total_calls > 0 THEN CAST(total_time_ms AS REAL) / total_calls
                         ELSE 0
@@ -205,6 +236,8 @@ class SQLiteUsageStorage:
         return self.usage_stats(kind="sql", name=sql_kind, database=database, usage_hour=usage_hour)
 
     def _apply_grouped_records(self, connection: sqlite3.Connection, records: Iterable[SpoolRecord]) -> None:
+        """Upsert-ит агрегаты в нужную таблицу в рамках одной транзакции."""
+
         for record in records:
             table_name, name_column = self._table_for_kind(record.kind)
             connection.execute(
@@ -221,10 +254,15 @@ class SQLiteUsageStorage:
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(usage_hour, database, {name_column}) DO UPDATE SET
+                    -- Новые данные за тот же час не заменяют старые, а
+                    -- наращивают счётчики и общее время.
                     total_calls = {table_name}.total_calls + excluded.total_calls,
                     total_time_ms = {table_name}.total_time_ms + excluded.total_time_ms,
+                    -- Экстремумы должны отражать весь час целиком.
                     min_time_ms = MIN({table_name}.min_time_ms, excluded.min_time_ms),
                     max_time_ms = MAX({table_name}.max_time_ms, excluded.max_time_ms),
+                    -- Для отладки и просмотра полезно знать последнюю метку
+                    -- времени, когда по этому ключу пришли данные.
                     last_seen_at = CASE
                         WHEN excluded.last_seen_at > {table_name}.last_seen_at
                         THEN excluded.last_seen_at
@@ -244,11 +282,15 @@ class SQLiteUsageStorage:
             )
 
     def _hour_filter_clause(self, usage_hour: Optional[str]) -> tuple[str, tuple[object, ...]]:
+        """Формирует WHERE по часу только когда фильтр действительно задан."""
+
         if usage_hour is None:
             return ("", ())
         return ("WHERE usage_hour = ?", (usage_hour,))
 
     def _table_for_kind(self, kind: str) -> tuple[str, str]:
+        """Сопоставляет логический тип статистики с таблицей и именем колонки."""
+
         if kind == "procedure":
             return ("procedure_usage_stats", "procedure")
         if kind == "sql":

@@ -13,6 +13,8 @@ from proc_usage.storage import SQLiteUsageStorage
 
 
 def _config_from_args(args: argparse.Namespace) -> ServiceConfig:
+    """Собирает конфигурацию либо из JSON, либо прямо из аргументов CLI."""
+
     if args.config:
         return load_service_config(Path(args.config))
     return ServiceConfig(
@@ -23,6 +25,8 @@ def _config_from_args(args: argparse.Namespace) -> ServiceConfig:
 
 
 def _build_parser() -> argparse.ArgumentParser:
+    """Описывает все команды CLI для инициализации, ingest и просмотра."""
+
     parser = argparse.ArgumentParser(prog="proc-usage")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -61,6 +65,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def handle_init_db(args: argparse.Namespace) -> int:
+    """Создаёт пустую SQLite-схему без запуска постоянного сервиса."""
+
     config = _config_from_args(args)
     storage = SQLiteUsageStorage(config.sqlite_db_path)
     storage.initialize()
@@ -69,6 +75,8 @@ def handle_init_db(args: argparse.Namespace) -> int:
 
 
 def handle_ingest_once(args: argparse.Namespace) -> int:
+    """Делает один проход по spool-файлам и сразу завершается."""
+
     config = _config_from_args(args)
     service = ProcUsageService.from_config(config)
     service.initialize()
@@ -78,6 +86,8 @@ def handle_ingest_once(args: argparse.Namespace) -> int:
 
 
 def handle_serve(args: argparse.Namespace) -> int:
+    """Запускает отдельный процесс-воркер, который периодически делает ingest."""
+
     config = _config_from_args(args)
     service = ProcUsageService.from_config(config)
     service.initialize()
@@ -85,6 +95,8 @@ def handle_serve(args: argparse.Namespace) -> int:
     stop_event = threading.Event()
 
     def _request_stop(_signum: int, _frame: object) -> None:
+        # Обработчик сигналов не завершает процесс мгновенно, а лишь просит
+        # главный цикл аккуратно остановиться после текущего шага.
         stop_event.set()
 
     signal.signal(signal.SIGINT, _request_stop)
@@ -96,6 +108,8 @@ def handle_serve(args: argparse.Namespace) -> int:
 
 
 def handle_top(args: argparse.Namespace) -> int:
+    """Печатает агрегаты с наибольшим числом вызовов за выбранный час или вообще."""
+
     config = _config_from_args(args)
     storage = SQLiteUsageStorage(config.sqlite_db_path)
     storage.initialize()
@@ -107,6 +121,8 @@ def handle_top(args: argparse.Namespace) -> int:
 
 
 def handle_show(args: argparse.Namespace) -> int:
+    """Показывает все найденные агрегаты по одному имени процедуры или виду SQL."""
+
     config = _config_from_args(args)
     storage = SQLiteUsageStorage(config.sqlite_db_path)
     storage.initialize()
@@ -128,6 +144,8 @@ def handle_show(args: argparse.Namespace) -> int:
 
 
 def handle_sample_config(args: argparse.Namespace) -> int:
+    """Выводит пример JSON-конфига для отдельного Python-сервиса."""
+
     _ = args
     sample = {
         "spool_dir": "/tmp/firebird_proc_usage_spool",
@@ -139,12 +157,16 @@ def handle_sample_config(args: argparse.Namespace) -> int:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    """Точка входа для `python3 -m proc_usage`."""
+
     parser = _build_parser()
     args = parser.parse_args(argv)
     return args.handler(args)
 
 
 def _format_row(row: object) -> str:
+    """Форматирует строку статистики для консольного вывода."""
+
     avg_time_ms = float(row["avg_time_ms"])
     return (
         f"{row['total_calls']:>10}  "

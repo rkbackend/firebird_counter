@@ -38,6 +38,8 @@ std::vector<std::string> split_list(const std::string& value)
 
 bool parse_bool_value(const std::string& raw_value)
 {
+    // Поддерживаем несколько привычных форматов булевых значений, чтобы
+    // конфиг было удобнее писать и переносить между окружениями.
     std::string value = raw_value;
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
         return static_cast<char>(std::tolower(ch));
@@ -58,6 +60,8 @@ bool parse_bool_value(const std::string& raw_value)
 
 CollectorConfig load_collector_config_from_file(const std::filesystem::path& path)
 {
+    // Формат deliberately простой: обычный текстовый файл с `key = value`.
+    // Его удобно править прямо на сервере без специальных утилит.
     std::ifstream input(path);
     if (!input) {
         throw std::runtime_error("Unable to open collector config: " + path.string());
@@ -86,6 +90,8 @@ CollectorConfig load_collector_config_from_file(const std::filesystem::path& pat
         const std::string key = trim(line.substr(0, separator));
         const std::string value = trim(line.substr(separator + 1));
 
+        // Каждый ключ разбирается явно. Это строже, зато опечатки в конфиге
+        // всплывают сразу, а не приводят к молчаливому запуску с дефолтами.
         if (key == "spool_dir") {
             config.spool_dir = value;
         }
@@ -110,6 +116,7 @@ CollectorConfig load_collector_config_from_file(const std::filesystem::path& pat
         }
     }
 
+    // Без spool_dir плагин физически не знает, куда писать JSONL-пакеты.
     if (config.spool_dir.empty()) {
         throw std::runtime_error("Collector config must define spool_dir");
     }
