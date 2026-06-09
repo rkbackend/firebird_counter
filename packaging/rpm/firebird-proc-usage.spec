@@ -89,7 +89,7 @@ install -Dpm 0755 build-rpm/%{plugin_library} \
 %endif
 
 %check
-python3 -m unittest -q tests.test_storage tests.test_service tests.test_benchmark
+python3 -m unittest -q tests.test_storage tests.test_service tests.test_benchmark tests.test_cli
 
 %post
 %systemd_post proc-usage.service

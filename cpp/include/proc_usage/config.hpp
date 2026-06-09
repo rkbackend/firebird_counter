@@ -17,6 +17,8 @@ struct CollectorConfig {
     std::filesystem::path spool_dir;
     // Необязательный диагностический лог, который использует плагин Firebird.
     std::filesystem::path debug_log_path;
+    // Если true, дополнительно собирать timing обычных SQL statement'ов.
+    bool enable_sql_stats {false};
     // Если список не пуст, будут учитываться только базы, путь которых содержит
     // один из этих фрагментов.
     std::vector<std::string> include_databases;

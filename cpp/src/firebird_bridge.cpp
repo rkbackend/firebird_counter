@@ -8,12 +8,27 @@ namespace {
 
 std::string to_upper_copy(std::string_view text)
 {
-    // SQL без учёта регистра проще разбирать, если сначала привести его к верхнему регистру.
     std::string result(text);
     std::transform(result.begin(), result.end(), result.begin(), [](unsigned char ch) {
         return static_cast<char>(std::toupper(ch));
     });
     return result;
+}
+
+std::string trim_copy(std::string_view text)
+{
+    std::size_t start = 0;
+    std::size_t end = text.size();
+
+    while (start < end && std::isspace(static_cast<unsigned char>(text[start]))) {
+        ++start;
+    }
+
+    while (end > start && std::isspace(static_cast<unsigned char>(text[end - 1]))) {
+        --end;
+    }
+
+    return std::string(text.substr(start, end - start));
 }
 
 }  // namespace
@@ -23,52 +38,42 @@ FirebirdTraceBridge::FirebirdTraceBridge(UsageCollector& collector)
 {
 }
 
-void FirebirdTraceBridge::on_procedure_execute(
+void FirebirdTraceBridge::on_procedure_finish(
     std::string_view database_path,
     std::string_view procedure_name,
+    std::uint64_t duration_ms,
     std::chrono::system_clock::time_point now
 )
 {
-    // Firebird может передать идентификатор с внешними кавычками или пробелами,
-    // поэтому сначала нормализуем имя, а потом используем его как часть ключа.
     const std::string normalized_name = trim_identifier(procedure_name);
     if (normalized_name.empty()) {
         return;
     }
 
-    // Превращаем string_view во владение std::string, потому что коллектор хранит данные у себя.
-    collector_.record_call(std::string(database_path), normalized_name, now);
+    collector_.record_usage(
+        UsageKind::procedure,
+        std::string(database_path),
+        normalized_name,
+        duration_ms,
+        now
+    );
 }
 
-std::optional<std::string> FirebirdTraceBridge::extract_procedure_name_from_sql(std::string_view sql_text) const
+void FirebirdTraceBridge::on_sql_finish(
+    std::string_view database_path,
+    std::string_view sql_text,
+    std::uint64_t duration_ms,
+    std::chrono::system_clock::time_point now
+)
 {
-    // Быстрый разбор самого типичного вида запроса:
-    // EXECUTE PROCEDURE MY_PROC(...)
-    const std::string upper_sql = to_upper_copy(sql_text);
-    const std::string prefix = "EXECUTE PROCEDURE ";
-
-    if (!upper_sql.starts_with(prefix)) {
-        return std::nullopt;
-    }
-
-    const std::size_t start = prefix.size();
-    std::size_t end = start;
-
-    // Имя процедуры заканчивается на первом пробеле или открывающей скобке.
-    while (end < sql_text.size()) {
-        const char ch = sql_text[end];
-        if (std::isspace(static_cast<unsigned char>(ch)) || ch == '(') {
-            break;
-        }
-        ++end;
-    }
-
-    const std::string name = trim_identifier(sql_text.substr(start, end - start));
-    if (name.empty()) {
-        return std::nullopt;
-    }
-
-    return name;
+    const std::string sql_kind = classify_sql_statement(sql_text);
+    collector_.record_usage(
+        UsageKind::sql,
+        std::string(database_path),
+        sql_kind,
+        duration_ms,
+        now
+    );
 }
 
 std::string FirebirdTraceBridge::trim_identifier(std::string_view text)
@@ -76,7 +81,6 @@ std::string FirebirdTraceBridge::trim_identifier(std::string_view text)
     std::size_t start = 0;
     std::size_t end = text.size();
 
-    // Сначала убираем пробелы по краям.
     while (start < end && std::isspace(static_cast<unsigned char>(text[start]))) {
         ++start;
     }
@@ -85,14 +89,37 @@ std::string FirebirdTraceBridge::trim_identifier(std::string_view text)
         --end;
     }
 
-    // В Firebird SQL идентификаторы могут быть заключены в двойные кавычки.
-    // Если кавычки обрамляют весь токен, снимаем их.
     if (end > start && text[start] == '"' && text[end - 1] == '"') {
         ++start;
         --end;
     }
 
     return std::string(text.substr(start, end - start));
+}
+
+std::string FirebirdTraceBridge::classify_sql_statement(std::string_view sql_text)
+{
+    const std::string trimmed = trim_copy(sql_text);
+    if (trimmed.empty()) {
+        return "UNKNOWN";
+    }
+
+    const std::string upper_sql = to_upper_copy(trimmed);
+    if (upper_sql.starts_with("EXECUTE PROCEDURE")) {
+        return "EXECUTE PROCEDURE";
+    }
+
+    if (upper_sql.starts_with("EXECUTE BLOCK")) {
+        return "EXECUTE BLOCK";
+    }
+
+    std::size_t end = 0;
+    while (end < upper_sql.size() && !std::isspace(static_cast<unsigned char>(upper_sql[end]))) {
+        ++end;
+    }
+
+    const std::string first_token = upper_sql.substr(0, end);
+    return first_token.empty() ? "UNKNOWN" : first_token;
 }
 
 }  // namespace proc_usage::firebird

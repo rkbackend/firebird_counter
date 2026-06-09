@@ -347,7 +347,7 @@ class FirebirdBenchmarkRunner:
             ).fetchone()[0]
             distinct_procedures = connection.execute(
                 """
-                SELECT COUNT(*)
+                SELECT COUNT(DISTINCT procedure)
                 FROM procedure_usage_stats
                 WHERE procedure LIKE 'BENCH_PROC_%'
                 """

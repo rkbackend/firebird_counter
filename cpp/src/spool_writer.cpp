@@ -10,6 +10,18 @@
 namespace proc_usage {
 namespace {
 
+std::string usage_kind_to_string(UsageKind kind)
+{
+    switch (kind) {
+    case UsageKind::procedure:
+        return "procedure";
+    case UsageKind::sql:
+        return "sql";
+    }
+
+    return "unknown";
+}
+
 std::string format_timestamp(std::chrono::system_clock::time_point timestamp)
 {
     // Преобразуем C++ time_point в строку UTC, например:
@@ -64,13 +76,16 @@ bool JsonlSpoolWriter::write_records(const std::vector<FlushRecord>& records)
         }
 
         for (const auto& record : records) {
-            // Каждая строка — это отдельный JSON-объект, поэтому Python-сервис
-            // может читать файл потоково и восстанавливаться после частичной обработки,
-            // не загружая весь пакет целиком в память.
+            // Каждая строка — это отдельный JSON-объект с уже агрегированными метриками.
             output << "{\"ts\":\"" << format_timestamp(record.timestamp)
+                   << "\",\"kind\":\"" << usage_kind_to_string(record.kind)
+                   << "\",\"hour\":\"" << escape_json_string(record.usage_hour)
                    << "\",\"db\":\"" << escape_json_string(record.database)
-                   << "\",\"proc\":\"" << escape_json_string(record.procedure)
-                   << "\",\"delta\":" << record.delta
+                   << "\",\"name\":\"" << escape_json_string(record.name)
+                   << "\",\"count\":" << record.count
+                   << ",\"total_time_ms\":" << record.total_time_ms
+                   << ",\"min_time_ms\":" << record.min_time_ms
+                   << ",\"max_time_ms\":" << record.max_time_ms
                    << "}\n";
         }
     }

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <chrono>
-#include <optional>
+#include <cstdint>
 #include <string>
 #include <string_view>
 
@@ -9,31 +9,27 @@
 
 namespace proc_usage::firebird {
 
-// Небольшой адаптер между "сырыми" trace-колбэками Firebird
-// и универсальным коллектором.
-// Его задача — нормализация данных, а не их хранение.
 class FirebirdTraceBridge {
 public:
     explicit FirebirdTraceBridge(UsageCollector& collector);
 
-    // Это узкая точка интеграции с trace-колбэками Firebird.
-    // Когда плагин получает событие вызова процедуры, он передаёт сюда
-    // уже нормализованные имена.
-    void on_procedure_execute(
+    void on_procedure_finish(
         std::string_view database_path,
         std::string_view procedure_name,
+        std::uint64_t duration_ms,
         std::chrono::system_clock::time_point now = std::chrono::system_clock::now()
     );
 
-    // В некоторых trace-сценариях доступен только SQL-текст.
-    // Этот метод извлекает имя процедуры из самого типичного шаблона
-    // "EXECUTE PROCEDURE ..." как безопасный запасной вариант.
-    std::optional<std::string> extract_procedure_name_from_sql(std::string_view sql_text) const;
+    void on_sql_finish(
+        std::string_view database_path,
+        std::string_view sql_text,
+        std::uint64_t duration_ms,
+        std::chrono::system_clock::time_point now = std::chrono::system_clock::now()
+    );
 
 private:
-    // Убирает пробелы по краям и снимает внешние двойные кавычки
-    // с SQL-идентификатора.
     static std::string trim_identifier(std::string_view text);
+    static std::string classify_sql_statement(std::string_view sql_text);
 
     UsageCollector& collector_;
 };

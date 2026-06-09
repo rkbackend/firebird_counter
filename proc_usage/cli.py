@@ -41,13 +41,17 @@ def _build_parser() -> argparse.ArgumentParser:
     serve = subparsers.add_parser("serve", parents=[config_parent], help="Run the long-lived ingestion service")
     serve.set_defaults(handler=handle_serve)
 
-    top = subparsers.add_parser("top", parents=[config_parent], help="Show the busiest procedures")
+    top = subparsers.add_parser("top", parents=[config_parent], help="Show the busiest procedures or SQL kinds")
     top.add_argument("--limit", type=int, default=10)
+    top.add_argument("--kind", choices=["procedure", "sql"], default="procedure")
+    top.add_argument("--hour", help="Optional UTC hour filter in YYYY-MM-DDTHH:00Z format")
     top.set_defaults(handler=handle_top)
 
-    show = subparsers.add_parser("show", parents=[config_parent], help="Show stats for one procedure")
-    show.add_argument("procedure", help="Procedure name to inspect")
+    show = subparsers.add_parser("show", parents=[config_parent], help="Show stats for one procedure or SQL kind")
+    show.add_argument("name", help="Procedure name or SQL kind to inspect")
     show.add_argument("--database", help="Optional database filter")
+    show.add_argument("--kind", choices=["procedure", "sql"], default="procedure")
+    show.add_argument("--hour", help="Optional UTC hour filter in YYYY-MM-DDTHH:00Z format")
     show.set_defaults(handler=handle_show)
 
     dump_config = subparsers.add_parser("sample-config", help="Print a sample JSON config")
@@ -96,8 +100,8 @@ def handle_top(args: argparse.Namespace) -> int:
     storage = SQLiteUsageStorage(config.sqlite_db_path)
     storage.initialize()
 
-    for row in storage.top_procedures(limit=args.limit):
-        print(f"{row['total_calls']:>10}  {row['database']}  {row['procedure']}  {row['last_seen_at']}")
+    for row in storage.top_usage(kind=args.kind, limit=args.limit, usage_hour=args.hour):
+        print(_format_row(row))
 
     return 0
 
@@ -107,13 +111,18 @@ def handle_show(args: argparse.Namespace) -> int:
     storage = SQLiteUsageStorage(config.sqlite_db_path)
     storage.initialize()
 
-    rows = storage.procedure_stats(procedure=args.procedure, database=args.database)
+    rows = storage.usage_stats(
+        kind=args.kind,
+        name=args.name,
+        database=args.database,
+        usage_hour=args.hour,
+    )
     if not rows:
         print("No statistics found.")
         return 0
 
     for row in rows:
-        print(f"database={row['database']} procedure={row['procedure']} total_calls={row['total_calls']} last_seen_at={row['last_seen_at']}")
+        print(_format_row(row))
 
     return 0
 
@@ -133,3 +142,17 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     return args.handler(args)
+
+
+def _format_row(row: object) -> str:
+    avg_time_ms = float(row["avg_time_ms"])
+    return (
+        f"{row['total_calls']:>10}  "
+        f"{row['usage_hour']}  "
+        f"{row['database']}  "
+        f"{row['name']}  "
+        f"min={row['min_time_ms']}ms  "
+        f"avg={avg_time_ms:.2f}ms  "
+        f"max={row['max_time_ms']}ms  "
+        f"{row['last_seen_at']}"
+    )

@@ -1,6 +1,6 @@
-# Счетчик Использования Процедур Firebird
+# Счетчик Использования Процедур и SQL Firebird
 
-В этом репозитории лежит гибридная реализация для подсчета использования хранимых процедур в Firebird 3 с минимальной нагрузкой на рабочую систему:
+В этом репозитории лежит гибридная реализация для подсчета и замера времени выполнения хранимых процедур и SQL-запросов в Firebird 3 с минимальной нагрузкой на рабочую систему:
 
 - `C++`-ядро сборщика, которое работает рядом с trace-callback'ами Firebird, держит счетчики в памяти и периодически сбрасывает компактные `JSONL`-снимки.
 - `Python`-сервис, который забирает эти снимки, сохраняет агрегированную статистику в `SQLite` и предоставляет небольшой CLI.
@@ -55,10 +55,34 @@ python3 -m proc_usage serve --config configs/python_service.json
 python3 -m proc_usage top --config configs/python_service.json --limit 10
 ```
 
+Покажите статистику за конкретный UTC-час:
+
+```bash
+python3 -m proc_usage top --config configs/python_service.json --hour 2026-06-06T12:00Z --limit 10
+```
+
+Покажите статистику по SQL-типам:
+
+```bash
+python3 -m proc_usage top --config configs/python_service.json --kind sql --limit 10
+```
+
 Покажите статистику по одной процедуре:
 
 ```bash
 python3 -m proc_usage show MY_PROC --config configs/python_service.json
+```
+
+Покажите статистику по одному типу SQL:
+
+```bash
+python3 -m proc_usage show SELECT --config configs/python_service.json --kind sql
+```
+
+Или по одному UTC-часу:
+
+```bash
+python3 -m proc_usage show MY_PROC --config configs/python_service.json --hour 2026-06-06T12:00Z
 ```
 
 ## Сборка `C++`-Части
@@ -194,7 +218,7 @@ Python-код лучше оставлять в стандартном `site-pack
 
 Плагин регистрируется внутри библиотеки под именем `ProcUsageTrace`.
 
-Ключевая точка интеграции - класс `proc_usage::firebird::FirebirdTraceBridge`. Trace plugin Firebird передает событие `trace_proc_execute(started=true)` в ядро сборщика, не добавляя запись в БД прямо в request path.
+Ключевая точка интеграции - класс `proc_usage::firebird::FirebirdTraceBridge`. Trace plugin Firebird передает в ядро завершенные события `trace_proc_execute(started=false)` и, при включенном `enable_sql_stats`, `trace_dsql_execute(started=false)`, не добавляя запись в БД прямо в request path.
 
 Конфигурацию сборщика можно передать двумя способами:
 
@@ -221,6 +245,7 @@ cmake --build build-firebird
 spool_dir = /tmp/firebird_proc_usage_spool
 debug_log_path = /tmp/proc_usage_trace_debug.log
 flush_interval_sec = 5
+enable_sql_stats = true
 include_databases =
 exclude_databases =
 ```
@@ -262,9 +287,10 @@ COMMIT;
 python3 -m proc_usage init-db --config configs/python_service.json
 python3 -m proc_usage ingest-once --config configs/python_service.json
 python3 -m proc_usage top --config configs/python_service.json --limit 10
+python3 -m proc_usage top --config configs/python_service.json --kind sql --limit 10
 ```
 
-Если Firebird-часть подключена правильно, вы увидите `PROC_A` в статистике `SQLite`.
+Если Firebird-часть подключена правильно, вы увидите в `SQLite` и статистику по процедурам вроде `PROC_A`, и агрегаты по типам SQL вроде `SELECT` и `EXECUTE PROCEDURE`.
 
 ## Локальный Benchmark
 

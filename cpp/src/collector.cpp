@@ -1,16 +1,49 @@
 #include "proc_usage/collector.hpp"
 
+#include <algorithm>
+#include <iomanip>
+#include <sstream>
 #include <utility>
 
 namespace proc_usage {
+namespace {
 
-std::size_t ProcedureKeyHash::operator()(const ProcedureKey& key) const noexcept
+std::string format_usage_hour(std::chrono::system_clock::time_point timestamp)
 {
-    // Хешируем обе части составного ключа и смешиваем их.
-    // Благодаря этому unordered_map распределяет записи и по базе, и по процедуре.
+    const std::time_t raw_time = std::chrono::system_clock::to_time_t(timestamp);
+    std::tm utc_time {};
+#if defined(_WIN32)
+    gmtime_s(&utc_time, &raw_time);
+#else
+    gmtime_r(&raw_time, &utc_time);
+#endif
+
+    std::ostringstream output;
+    output << std::put_time(&utc_time, "%Y-%m-%dT%H:00Z");
+    return output.str();
+}
+
+}  // namespace
+
+std::size_t UsageKeyHash::operator()(const UsageKey& key) const noexcept
+{
+    const std::size_t kind_hash = std::hash<int>{}(static_cast<int>(key.kind));
+    const std::size_t hour_hash = std::hash<std::string>{}(key.usage_hour);
     const std::size_t database_hash = std::hash<std::string>{}(key.database);
-    const std::size_t procedure_hash = std::hash<std::string>{}(key.procedure);
-    return database_hash ^ (procedure_hash << 1U);
+    const std::size_t name_hash = std::hash<std::string>{}(key.name);
+    return kind_hash ^ (hour_hash << 1U) ^ (database_hash << 2U) ^ (name_hash << 3U);
+}
+
+void UsageAggregate::observe(
+    std::uint64_t duration_ms,
+    std::chrono::system_clock::time_point observed_at
+)
+{
+    total_time_ms += duration_ms;
+    min_time_ms = count == 0 ? duration_ms : std::min(min_time_ms, duration_ms);
+    max_time_ms = count == 0 ? duration_ms : std::max(max_time_ms, duration_ms);
+    last_seen_at = count == 0 ? observed_at : std::max(last_seen_at, observed_at);
+    count += 1;
 }
 
 UsageCollector::UsageCollector(CollectorConfig config, std::shared_ptr<SpoolWriter> spool_writer)
@@ -20,29 +53,25 @@ UsageCollector::UsageCollector(CollectorConfig config, std::shared_ptr<SpoolWrit
 {
 }
 
-void UsageCollector::record_call(
+void UsageCollector::record_usage(
+    UsageKind kind,
     const std::string& database_path,
-    const std::string& procedure_name,
+    const std::string& name,
+    std::uint64_t duration_ms,
     std::chrono::system_clock::time_point now
 )
 {
-    // Сразу отбрасываем неподходящие входные данные:
-    // - пустое имя процедуры нельзя корректно учитывать
-    // - базы, попавшие под фильтр, специально исключены конфигом
-    if (procedure_name.empty() || !should_track_database(database_path)) {
+    if (name.empty() || !should_track_database(database_path)) {
         return;
     }
 
+    const std::string usage_hour = format_usage_hour(now);
+
     {
-        // Самый частый путь выполнения затрагивает только память и держит
-        // блокировку совсем недолго, чтобы обычные запросы не ждали запись
-        // на диск и сериализацию JSON.
         std::lock_guard<std::mutex> guard(mutex_);
-        counters_[ProcedureKey{database_path, procedure_name}] += 1;
+        aggregates_[UsageKey{kind, usage_hour, database_path, name}].observe(duration_ms, now);
     }
 
-    // На каждом колбэке мы не делаем полный сброс синхронно.
-    // Здесь только проверяется, прошёл ли нужный интервал.
     flush_if_due(now);
 }
 
@@ -50,56 +79,52 @@ bool UsageCollector::flush_if_due(std::chrono::system_clock::time_point now)
 {
     {
         std::lock_guard<std::mutex> guard(mutex_);
-        // Ещё рано: продолжаем копить данные в памяти и быстро выходим.
         if (now - last_flush_at_ < config_.flush_interval) {
             return false;
         }
     }
 
-    // Сам сброс выполняется уже вне первой короткой критической секции.
     return flush_now(now);
 }
 
 bool UsageCollector::flush_now(std::chrono::system_clock::time_point now)
 {
-    // Здесь будет временно храниться снимок всех накопленных счётчиков,
-    // пока мы их записываем.
-    CounterMap snapshot;
+    AggregateMap snapshot;
 
     {
-        // Под блокировкой мы целиком меняем текущую таблицу счётчиков на пустую
-        // и сразу отпускаем mutex.
-        // Так критическая секция остаётся короткой даже при большом числе записей.
         std::lock_guard<std::mutex> guard(mutex_);
-        if (counters_.empty()) {
-            // Даже если работы нет, запоминаем, что момент "now" уже проверяли.
+        if (aggregates_.empty()) {
             last_flush_at_ = now;
             return false;
         }
 
-        // После этого новые колбэки будут писать в новую пустую таблицу,
-        // а "snapshot" сохранит старые накопленные значения для сериализации.
-        snapshot = detach_pending_counters_unlocked();
+        snapshot = detach_pending_aggregates_unlocked();
         last_flush_at_ = now;
     }
 
-    // Преобразуем внутреннюю таблицу счётчиков в плоский список выходных записей.
-    const auto records = build_records(snapshot, now);
+    const auto records = build_records(snapshot);
     if (records.empty()) {
         return false;
     }
 
-    // Реальную запись на диск отдаём выбранной реализации writer'а.
     if (spool_writer_ && spool_writer_->write_records(records)) {
         return true;
     }
 
     {
-        // Если сброс не удался, возвращаем данные из snapshot обратно,
-        // чтобы счётчики не потерялись.
         std::lock_guard<std::mutex> guard(mutex_);
-        for (const auto& [key, delta] : snapshot) {
-            counters_[key] += delta;
+        for (const auto& [key, aggregate] : snapshot) {
+            auto& current = aggregates_[key];
+            if (current.count == 0) {
+                current = aggregate;
+                continue;
+            }
+
+            current.total_time_ms += aggregate.total_time_ms;
+            current.min_time_ms = std::min(current.min_time_ms, aggregate.min_time_ms);
+            current.max_time_ms = std::max(current.max_time_ms, aggregate.max_time_ms);
+            current.last_seen_at = std::max(current.last_seen_at, aggregate.last_seen_at);
+            current.count += aggregate.count;
         }
     }
 
@@ -108,19 +133,17 @@ bool UsageCollector::flush_now(std::chrono::system_clock::time_point now)
 
 std::size_t UsageCollector::pending_entry_count() const
 {
-    // Количество уникальных пар (база, процедура), которые сейчас накоплены.
     std::lock_guard<std::mutex> guard(mutex_);
-    return counters_.size();
+    return aggregates_.size();
 }
 
 std::uint64_t UsageCollector::pending_total_calls() const
 {
     std::lock_guard<std::mutex> guard(mutex_);
 
-    // Складываем все накопленные значения по всем ключам процедур.
     std::uint64_t total = 0;
-    for (const auto& [_, count] : counters_) {
-        total += count;
+    for (const auto& [_, aggregate] : aggregates_) {
+        total += aggregate.count;
     }
 
     return total;
@@ -128,8 +151,6 @@ std::uint64_t UsageCollector::pending_total_calls() const
 
 bool UsageCollector::should_track_database(const std::string& database_path) const
 {
-    // Все правила include/exclude вынесены в config.cpp,
-    // чтобы сам коллектор отвечал только за подсчёт и сброс.
     return database_matches_filters(
         database_path,
         config_.include_databases,
@@ -137,30 +158,29 @@ bool UsageCollector::should_track_database(const std::string& database_path) con
     );
 }
 
-UsageCollector::CounterMap UsageCollector::detach_pending_counters_unlocked()
+UsageCollector::AggregateMap UsageCollector::detach_pending_aggregates_unlocked()
 {
-    // swap() для самого объекта map работает за O(1):
-    // мы передаём владение всей таблицей сразу, а не копируем записи по одной.
-    CounterMap detached;
-    detached.swap(counters_);
+    AggregateMap detached;
+    detached.swap(aggregates_);
     return detached;
 }
 
-std::vector<FlushRecord> UsageCollector::build_records(
-    const CounterMap& counters,
-    std::chrono::system_clock::time_point timestamp
-) const
+std::vector<FlushRecord> UsageCollector::build_records(const AggregateMap& aggregates) const
 {
     std::vector<FlushRecord> records;
-    records.reserve(counters.size());
+    records.reserve(aggregates.size());
 
-    for (const auto& [key, delta] : counters) {
-        // Каждый накопленный счётчик превращается в одну отдельную выходную запись.
+    for (const auto& [key, aggregate] : aggregates) {
         records.push_back(FlushRecord{
-            .timestamp = timestamp,
+            .timestamp = aggregate.last_seen_at,
+            .kind = key.kind,
+            .usage_hour = key.usage_hour,
             .database = key.database,
-            .procedure = key.procedure,
-            .delta = delta,
+            .name = key.name,
+            .count = aggregate.count,
+            .total_time_ms = aggregate.total_time_ms,
+            .min_time_ms = aggregate.min_time_ms,
+            .max_time_ms = aggregate.max_time_ms,
         });
     }
 

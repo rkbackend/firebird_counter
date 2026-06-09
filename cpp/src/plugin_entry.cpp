@@ -1,5 +1,6 @@
 #ifdef PROC_USAGE_ENABLE_FIREBIRD_SDK
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cctype>
@@ -41,7 +42,9 @@ using Firebird::ITraceFactory;
 using Firebird::ITraceInitInfo;
 using Firebird::ITracePlugin;
 using Firebird::ITraceProcedure;
+using Firebird::ITraceSQLStatement;
 using Firebird::ITraceTransaction;
+using Firebird::PerformanceInfo;
 using Firebird::ThrowStatusWrapper;
 
 constexpr const char* kPluginName = "ProcUsageTrace";
@@ -213,6 +216,24 @@ std::vector<std::string> split_filter_list(std::string_view text)
     return filters;
 }
 
+bool parse_bool_value(std::string_view raw_value)
+{
+    std::string value = trim_copy(raw_value);
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+
+    if (value == "1" || value == "true" || value == "yes" || value == "on") {
+        return true;
+    }
+
+    if (value == "0" || value == "false" || value == "no" || value == "off") {
+        return false;
+    }
+
+    throw std::runtime_error("Invalid boolean value: " + std::string(raw_value));
+}
+
 std::optional<std::string> getenv_non_empty(const char* name)
 {
     // В разных окружениях развёртывания настройки плагина может быть удобно
@@ -235,6 +256,15 @@ std::string get_entry_value(IConfig* config, ThrowStatusWrapper* status, const c
 
     const char* value = entry->getValue();
     return value == nullptr ? std::string() : trim_copy(value);
+}
+
+std::uint64_t read_duration_ms(PerformanceInfo* perf)
+{
+    if (perf == nullptr || perf->pin_time < 0) {
+        return 0;
+    }
+
+    return static_cast<std::uint64_t>(perf->pin_time);
 }
 
 CollectorConfig default_config()
@@ -282,6 +312,10 @@ CollectorConfig load_collector_config_from_plugin(
 
     if (const std::string debug_log_path = get_entry_value(raw_config.get(), status, "debug_log_path"); !debug_log_path.empty()) {
         config.debug_log_path = debug_log_path;
+    }
+
+    if (const std::string enable_sql_stats = get_entry_value(raw_config.get(), status, "enable_sql_stats"); !enable_sql_stats.empty()) {
+        config.enable_sql_stats = parse_bool_value(enable_sql_stats);
     }
 
     if (const std::string include = get_entry_value(raw_config.get(), status, "include_databases"); !include.empty()) {
@@ -364,7 +398,8 @@ class ProcUsageTracePlugin final
       private ReferenceCountedMixin {
 public:
     explicit ProcUsageTracePlugin(CollectorConfig config)
-        : debug_log_(std::make_shared<DebugLog>(config.debug_log_path)),
+        : enable_sql_stats_(config.enable_sql_stats),
+          debug_log_(std::make_shared<DebugLog>(config.debug_log_path)),
           spool_dir_(config.spool_dir),
           writer_(std::make_shared<JsonlSpoolWriter>(spool_dir_)),
           collector_(std::move(config), writer_),
@@ -448,28 +483,28 @@ public:
         unsigned
     ) override
     {
-        // В некоторых trace-режимах Firebird вызывает этот хук дважды:
-        // до и после выполнения.
-        // Учитываем только событие "started", чтобы не было двойного подсчёта.
-        if (!started || connection == nullptr || procedure == nullptr) {
+        // Для timing нужен именно finish-хук, где Firebird уже знает duration.
+        if (started || connection == nullptr || procedure == nullptr) {
             return true;
         }
 
         try {
             const char* database_name = connection->getDatabaseName();
             const char* procedure_name = procedure->getProcName();
+            const std::uint64_t duration_ms = read_duration_ms(procedure->getPerf());
 
-            // Правило "как именно считать один вызов процедуры" живёт в bridge_,
-            // поэтому сам trace-хук остаётся коротким и его проще отлаживать.
-            bridge_.on_procedure_execute(
+            bridge_.on_procedure_finish(
                 database_name == nullptr ? std::string_view() : std::string_view(database_name),
-                procedure_name == nullptr ? std::string_view() : std::string_view(procedure_name)
+                procedure_name == nullptr ? std::string_view() : std::string_view(procedure_name),
+                duration_ms
             );
             debug_log_->write(
-                "trace_proc_execute started db=" +
+                "trace_proc_execute finish db=" +
                 std::string(database_name == nullptr ? "" : database_name) +
                 " proc=" +
-                std::string(procedure_name == nullptr ? "" : procedure_name)
+                std::string(procedure_name == nullptr ? "" : procedure_name) +
+                " duration_ms=" +
+                std::to_string(duration_ms)
             );
             return true;
         }
@@ -495,19 +530,56 @@ public:
         return true;
     }
 
-    FB_BOOLEAN trace_dsql_prepare(ITraceDatabaseConnection*, ITraceTransaction*, Firebird::ITraceSQLStatement*, ISC_INT64, unsigned) override
+    FB_BOOLEAN trace_dsql_prepare(ITraceDatabaseConnection*, ITraceTransaction*, ITraceSQLStatement*, ISC_INT64, unsigned) override
     {
         return true;
     }
 
-    FB_BOOLEAN trace_dsql_free(ITraceDatabaseConnection*, Firebird::ITraceSQLStatement*, unsigned) override
+    FB_BOOLEAN trace_dsql_free(ITraceDatabaseConnection*, ITraceSQLStatement*, unsigned) override
     {
         return true;
     }
 
-    FB_BOOLEAN trace_dsql_execute(ITraceDatabaseConnection*, ITraceTransaction*, Firebird::ITraceSQLStatement*, FB_BOOLEAN, unsigned) override
+    FB_BOOLEAN trace_dsql_execute(
+        ITraceDatabaseConnection* connection,
+        ITraceTransaction*,
+        ITraceSQLStatement* statement,
+        FB_BOOLEAN started,
+        unsigned
+    ) override
     {
-        return true;
+        if (!enable_sql_stats_ || started || connection == nullptr || statement == nullptr) {
+            return true;
+        }
+
+        try {
+            const char* database_name = connection->getDatabaseName();
+            const char* sql_text = statement->getTextUTF8();
+            const std::uint64_t duration_ms = read_duration_ms(statement->getPerf());
+
+            bridge_.on_sql_finish(
+                database_name == nullptr ? std::string_view() : std::string_view(database_name),
+                sql_text == nullptr ? std::string_view() : std::string_view(sql_text),
+                duration_ms
+            );
+            debug_log_->write(
+                "trace_dsql_execute finish db=" +
+                std::string(database_name == nullptr ? "" : database_name) +
+                " duration_ms=" +
+                std::to_string(duration_ms)
+            );
+            return true;
+        }
+        catch (const std::exception& exception) {
+            last_error_ = exception.what();
+            debug_log_->write("trace_dsql_execute failed: " + last_error_);
+            return false;
+        }
+        catch (...) {
+            last_error_ = "Unknown exception in trace_dsql_execute";
+            debug_log_->write(last_error_);
+            return false;
+        }
     }
 
     FB_BOOLEAN trace_blr_compile(ITraceDatabaseConnection*, ITraceTransaction*, Firebird::ITraceBLRStatement*, ISC_INT64, unsigned) override
@@ -599,6 +671,7 @@ private:
         }
     }
 
+    bool enable_sql_stats_ {false};
     // Общий отладочный лог для этого экземпляра плагина.
     std::shared_ptr<DebugLog> debug_log_;
     // Хранится в основном для логов и удобства просмотра;

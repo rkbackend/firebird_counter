@@ -4,13 +4,12 @@ database
     log_connections = false
     log_transactions = false
     log_statement_prepare = false
-    log_statement_start = true
-    log_statement_finish = false
-    log_procedure_start = true
-    log_procedure_finish = false
+    log_statement_start = false
+    log_statement_finish = true
+    log_procedure_start = false
+    log_procedure_finish = true
     log_function_start = false
     log_function_finish = false
     print_plan = false
     print_perf = false
 }
-

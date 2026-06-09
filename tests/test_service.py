@@ -20,9 +20,39 @@ class ProcUsageServiceTests(unittest.TestCase):
             database_path = root / "stats.sqlite3"
 
             payloads = [
-                {"ts": "2026-06-06T12:00:00.000Z", "db": "/db/main.fdb", "proc": "PROC_A", "delta": 2},
-                {"ts": "2026-06-06T12:00:05.000Z", "db": "/db/main.fdb", "proc": "PROC_A", "delta": 3},
-                {"ts": "2026-06-06T12:00:03.000Z", "db": "/db/main.fdb", "proc": "PROC_B", "delta": 1},
+                {
+                    "ts": "2026-06-06T12:00:00.000Z",
+                    "kind": "procedure",
+                    "hour": "2026-06-06T12:00Z",
+                    "db": "/db/main.fdb",
+                    "name": "PROC_A",
+                    "count": 2,
+                    "total_time_ms": 14,
+                    "min_time_ms": 6,
+                    "max_time_ms": 8,
+                },
+                {
+                    "ts": "2026-06-06T12:00:05.000Z",
+                    "kind": "procedure",
+                    "hour": "2026-06-06T12:00Z",
+                    "db": "/db/main.fdb",
+                    "name": "PROC_A",
+                    "count": 3,
+                    "total_time_ms": 27,
+                    "min_time_ms": 7,
+                    "max_time_ms": 11,
+                },
+                {
+                    "ts": "2026-06-06T12:00:03.000Z",
+                    "kind": "sql",
+                    "hour": "2026-06-06T12:00Z",
+                    "db": "/db/main.fdb",
+                    "name": "SELECT",
+                    "count": 5,
+                    "total_time_ms": 20,
+                    "min_time_ms": 2,
+                    "max_time_ms": 7,
+                },
             ]
             lines = "\n".join(json.dumps(item) for item in payloads) + "\n"
             (spool_dir / "batch_001.jsonl").write_text(lines, encoding="utf-8")
@@ -36,13 +66,20 @@ class ProcUsageServiceTests(unittest.TestCase):
             self.assertEqual(processed, 1)
 
             storage = SQLiteUsageStorage(database_path)
-            rows = storage.top_procedures(limit=10)
-            self.assertEqual(len(rows), 2)
-            self.assertEqual(rows[0]["procedure"], "PROC_A")
-            self.assertEqual(rows[0]["total_calls"], 5)
-            self.assertEqual(rows[0]["last_seen_at"], "2026-06-06T12:00:05+00:00")
-            self.assertEqual(rows[1]["procedure"], "PROC_B")
-            self.assertEqual(rows[1]["total_calls"], 1)
+            procedure_rows = storage.top_procedures(limit=10, usage_hour="2026-06-06T12:00Z")
+            self.assertEqual(len(procedure_rows), 1)
+            self.assertEqual(procedure_rows[0]["usage_hour"], "2026-06-06T12:00Z")
+            self.assertEqual(procedure_rows[0]["name"], "PROC_A")
+            self.assertEqual(procedure_rows[0]["total_calls"], 5)
+            self.assertEqual(procedure_rows[0]["total_time_ms"], 41)
+            self.assertEqual(procedure_rows[0]["min_time_ms"], 6)
+            self.assertEqual(procedure_rows[0]["max_time_ms"], 11)
+            self.assertEqual(procedure_rows[0]["last_seen_at"], "2026-06-06T12:00:05+00:00")
+
+            sql_rows = storage.top_sql(limit=10, usage_hour="2026-06-06T12:00Z")
+            self.assertEqual(len(sql_rows), 1)
+            self.assertEqual(sql_rows[0]["name"], "SELECT")
+            self.assertEqual(sql_rows[0]["total_calls"], 5)
 
             self.assertEqual(list(spool_dir.glob("*")), [])
 
@@ -53,7 +90,17 @@ class ProcUsageServiceTests(unittest.TestCase):
             spool_dir.mkdir(parents=True, exist_ok=True)
             database_path = root / "stats.sqlite3"
 
-            payload = {"ts": "2026-06-06T12:00:00.000Z", "db": "/db/main.fdb", "proc": "PROC_A", "delta": 7}
+            payload = {
+                "ts": "2026-06-06T12:00:00.000Z",
+                "kind": "procedure",
+                "hour": "2026-06-06T12:00Z",
+                "db": "/db/main.fdb",
+                "name": "PROC_A",
+                "count": 7,
+                "total_time_ms": 49,
+                "min_time_ms": 7,
+                "max_time_ms": 7,
+            }
             (spool_dir / "orphaned.processing").write_text(json.dumps(payload) + "\n", encoding="utf-8")
 
             service = ProcUsageService.from_config(
@@ -65,9 +112,10 @@ class ProcUsageServiceTests(unittest.TestCase):
             self.assertEqual(processed, 1)
 
             storage = SQLiteUsageStorage(database_path)
-            rows = storage.procedure_stats("PROC_A")
+            rows = storage.procedure_stats("PROC_A", usage_hour="2026-06-06T12:00Z")
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["total_calls"], 7)
+            self.assertEqual(rows[0]["total_time_ms"], 49)
 
     def test_permission_denied_on_rename_falls_back_to_in_place_processing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -76,7 +124,17 @@ class ProcUsageServiceTests(unittest.TestCase):
             spool_dir.mkdir(parents=True, exist_ok=True)
             database_path = root / "stats.sqlite3"
 
-            payload = {"ts": "2026-06-06T12:00:00.000Z", "db": "/db/main.fdb", "proc": "PROC_A", "delta": 7}
+            payload = {
+                "ts": "2026-06-06T12:00:00.000Z",
+                "kind": "procedure",
+                "hour": "2026-06-06T12:00Z",
+                "db": "/db/main.fdb",
+                "name": "PROC_A",
+                "count": 7,
+                "total_time_ms": 42,
+                "min_time_ms": 6,
+                "max_time_ms": 6,
+            }
             spool_file = spool_dir / "batch_001.jsonl"
             spool_file.write_text(json.dumps(payload) + "\n", encoding="utf-8")
 
@@ -93,7 +151,7 @@ class ProcUsageServiceTests(unittest.TestCase):
                 self.assertEqual(processed_again, 0)
 
             storage = SQLiteUsageStorage(database_path)
-            rows = storage.procedure_stats("PROC_A")
+            rows = storage.procedure_stats("PROC_A", usage_hour="2026-06-06T12:00Z")
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["total_calls"], 7)
             self.assertTrue(spool_file.exists())

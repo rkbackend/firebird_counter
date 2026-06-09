@@ -22,11 +22,30 @@ class SQLiteUsageStorage:
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS procedure_usage_stats (
+                    usage_hour TEXT NOT NULL,
                     database TEXT NOT NULL,
                     procedure TEXT NOT NULL,
                     total_calls INTEGER NOT NULL,
+                    total_time_ms INTEGER NOT NULL,
+                    min_time_ms INTEGER NOT NULL,
+                    max_time_ms INTEGER NOT NULL,
                     last_seen_at TEXT NOT NULL,
-                    PRIMARY KEY (database, procedure)
+                    PRIMARY KEY (usage_hour, database, procedure)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS sql_usage_stats (
+                    usage_hour TEXT NOT NULL,
+                    database TEXT NOT NULL,
+                    sql_kind TEXT NOT NULL,
+                    total_calls INTEGER NOT NULL,
+                    total_time_ms INTEGER NOT NULL,
+                    min_time_ms INTEGER NOT NULL,
+                    max_time_ms INTEGER NOT NULL,
+                    last_seen_at TEXT NOT NULL,
+                    PRIMARY KEY (usage_hour, database, sql_kind)
                 )
                 """
             )
@@ -48,28 +67,7 @@ class SQLiteUsageStorage:
             return
 
         with self._connect() as connection:
-            for record in grouped.values():
-                # This UPSERT keeps the storage append-free while still preserving
-                # the latest timestamp observed for each database/procedure pair.
-                connection.execute(
-                    """
-                    INSERT INTO procedure_usage_stats (database, procedure, total_calls, last_seen_at)
-                    VALUES (?, ?, ?, ?)
-                    ON CONFLICT(database, procedure) DO UPDATE SET
-                        total_calls = total_calls + excluded.total_calls,
-                        last_seen_at = CASE
-                            WHEN excluded.last_seen_at > procedure_usage_stats.last_seen_at
-                            THEN excluded.last_seen_at
-                            ELSE procedure_usage_stats.last_seen_at
-                        END
-                    """,
-                    (
-                        record.db,
-                        record.proc,
-                        record.delta,
-                        record.ts.isoformat(),
-                    ),
-                )
+            self._apply_grouped_records(connection, grouped.values())
 
     def has_processed_spool_file(self, file_state: SpoolFileState) -> bool:
         with self._connect() as connection:
@@ -99,27 +97,7 @@ class SQLiteUsageStorage:
             if existing is not None:
                 return False
 
-            for record in grouped.values():
-                connection.execute(
-                    """
-                    INSERT INTO procedure_usage_stats (database, procedure, total_calls, last_seen_at)
-                    VALUES (?, ?, ?, ?)
-                    ON CONFLICT(database, procedure) DO UPDATE SET
-                        total_calls = total_calls + excluded.total_calls,
-                        last_seen_at = CASE
-                            WHEN excluded.last_seen_at > procedure_usage_stats.last_seen_at
-                            THEN excluded.last_seen_at
-                            ELSE procedure_usage_stats.last_seen_at
-                        END
-                    """,
-                    (
-                        record.db,
-                        record.proc,
-                        record.delta,
-                        record.ts.isoformat(),
-                    ),
-                )
-
+            self._apply_grouped_records(connection, grouped.values())
             connection.execute(
                 """
                 INSERT INTO processed_spool_files (path, size_bytes, mtime_ns, processed_at)
@@ -130,40 +108,149 @@ class SQLiteUsageStorage:
 
         return True
 
-    def top_procedures(self, limit: int = 10) -> list[sqlite3.Row]:
+    def top_usage(self, kind: str, limit: int = 10, usage_hour: Optional[str] = None) -> list[sqlite3.Row]:
+        table_name, name_column = self._table_for_kind(kind)
+        where_clause, parameters = self._hour_filter_clause(usage_hour)
         with self._connect() as connection:
             rows = connection.execute(
-                """
-                SELECT database, procedure, total_calls, last_seen_at
-                FROM procedure_usage_stats
-                ORDER BY total_calls DESC, database ASC, procedure ASC
+                f"""
+                SELECT
+                    usage_hour,
+                    database,
+                    {name_column} AS name,
+                    total_calls,
+                    total_time_ms,
+                    min_time_ms,
+                    max_time_ms,
+                    CASE
+                        WHEN total_calls > 0 THEN CAST(total_time_ms AS REAL) / total_calls
+                        ELSE 0
+                    END AS avg_time_ms,
+                    last_seen_at
+                FROM {table_name}
+                {where_clause}
+                ORDER BY usage_hour DESC, total_calls DESC, total_time_ms DESC, database ASC, name ASC
                 LIMIT ?
                 """,
-                (limit,),
+                (*parameters, limit),
             ).fetchall()
         return rows
 
-    def procedure_stats(self, procedure: str, database: Optional[str] = None) -> list[sqlite3.Row]:
+    def usage_stats(
+        self,
+        kind: str,
+        name: str,
+        database: Optional[str] = None,
+        usage_hour: Optional[str] = None,
+    ) -> list[sqlite3.Row]:
+        table_name, name_column = self._table_for_kind(kind)
+        conditions = [f"{name_column} = ?"]
+        parameters: list[object] = [name]
+
+        if database is not None:
+            conditions.append("database = ?")
+            parameters.append(database)
+
+        if usage_hour is not None:
+            conditions.append("usage_hour = ?")
+            parameters.append(usage_hour)
+
+        where_clause = " AND ".join(conditions)
         with self._connect() as connection:
-            if database is None:
-                rows = connection.execute(
-                    """
-                    SELECT database, procedure, total_calls, last_seen_at
-                    FROM procedure_usage_stats
-                    WHERE procedure = ?
-                    ORDER BY total_calls DESC, database ASC
-                    """,
-                    (procedure,),
-                ).fetchall()
-            else:
-                rows = connection.execute(
-                    """
-                    SELECT database, procedure, total_calls, last_seen_at
-                    FROM procedure_usage_stats
-                    WHERE procedure = ? AND database = ?
-                    ORDER BY total_calls DESC, database ASC
-                    """,
-                    (procedure, database),
-                ).fetchall()
+            rows = connection.execute(
+                f"""
+                SELECT
+                    usage_hour,
+                    database,
+                    {name_column} AS name,
+                    total_calls,
+                    total_time_ms,
+                    min_time_ms,
+                    max_time_ms,
+                    CASE
+                        WHEN total_calls > 0 THEN CAST(total_time_ms AS REAL) / total_calls
+                        ELSE 0
+                    END AS avg_time_ms,
+                    last_seen_at
+                FROM {table_name}
+                WHERE {where_clause}
+                ORDER BY usage_hour DESC, total_calls DESC, total_time_ms DESC, database ASC
+                """
+                ,
+                parameters,
+            ).fetchall()
 
         return rows
+
+    def top_procedures(self, limit: int = 10, usage_hour: Optional[str] = None) -> list[sqlite3.Row]:
+        return self.top_usage(kind="procedure", limit=limit, usage_hour=usage_hour)
+
+    def procedure_stats(
+        self,
+        procedure: str,
+        database: Optional[str] = None,
+        usage_hour: Optional[str] = None,
+    ) -> list[sqlite3.Row]:
+        return self.usage_stats(kind="procedure", name=procedure, database=database, usage_hour=usage_hour)
+
+    def top_sql(self, limit: int = 10, usage_hour: Optional[str] = None) -> list[sqlite3.Row]:
+        return self.top_usage(kind="sql", limit=limit, usage_hour=usage_hour)
+
+    def sql_stats(
+        self,
+        sql_kind: str,
+        database: Optional[str] = None,
+        usage_hour: Optional[str] = None,
+    ) -> list[sqlite3.Row]:
+        return self.usage_stats(kind="sql", name=sql_kind, database=database, usage_hour=usage_hour)
+
+    def _apply_grouped_records(self, connection: sqlite3.Connection, records: Iterable[SpoolRecord]) -> None:
+        for record in records:
+            table_name, name_column = self._table_for_kind(record.kind)
+            connection.execute(
+                f"""
+                INSERT INTO {table_name} (
+                    usage_hour,
+                    database,
+                    {name_column},
+                    total_calls,
+                    total_time_ms,
+                    min_time_ms,
+                    max_time_ms,
+                    last_seen_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(usage_hour, database, {name_column}) DO UPDATE SET
+                    total_calls = {table_name}.total_calls + excluded.total_calls,
+                    total_time_ms = {table_name}.total_time_ms + excluded.total_time_ms,
+                    min_time_ms = MIN({table_name}.min_time_ms, excluded.min_time_ms),
+                    max_time_ms = MAX({table_name}.max_time_ms, excluded.max_time_ms),
+                    last_seen_at = CASE
+                        WHEN excluded.last_seen_at > {table_name}.last_seen_at
+                        THEN excluded.last_seen_at
+                        ELSE {table_name}.last_seen_at
+                    END
+                """,
+                (
+                    record.hour,
+                    record.db,
+                    record.name,
+                    record.count,
+                    record.total_time_ms,
+                    record.min_time_ms,
+                    record.max_time_ms,
+                    record.ts.isoformat(),
+                ),
+            )
+
+    def _hour_filter_clause(self, usage_hour: Optional[str]) -> tuple[str, tuple[object, ...]]:
+        if usage_hour is None:
+            return ("", ())
+        return ("WHERE usage_hour = ?", (usage_hour,))
+
+    def _table_for_kind(self, kind: str) -> tuple[str, str]:
+        if kind == "procedure":
+            return ("procedure_usage_stats", "procedure")
+        if kind == "sql":
+            return ("sql_usage_stats", "sql_kind")
+        raise ValueError(f"Unsupported usage kind: {kind}")

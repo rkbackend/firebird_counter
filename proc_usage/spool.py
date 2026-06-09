@@ -10,9 +10,14 @@ from typing import Callable, Iterable, Iterator
 @dataclass
 class SpoolRecord:
     ts: datetime
+    kind: str
+    hour: str
     db: str
-    proc: str
-    delta: int
+    name: str
+    count: int
+    total_time_ms: int
+    min_time_ms: int
+    max_time_ms: int
 
 
 @dataclass(frozen=True)
@@ -37,8 +42,6 @@ class SpoolIngestor:
         self.spool_dir.mkdir(parents=True, exist_ok=True)
         claimed: list[ClaimedSpoolFile] = []
 
-        # Leftover ".processing" files are retried first because they indicate the
-        # previous service run crashed after claiming but before final cleanup.
         processing_files = sorted(self.spool_dir.glob("*.processing"))
         for path in processing_files:
             state = self.describe_file(path)
@@ -69,9 +72,6 @@ class SpoolIngestor:
             except FileNotFoundError:
                 continue
             except PermissionError:
-                # In sticky or shared directories Firebird may create files we can read
-                # but cannot rename. In that case we process the file in place and let
-                # SQLite deduplicate by file fingerprint.
                 state = self.describe_file(path)
                 if is_processed(state):
                     continue
@@ -94,9 +94,14 @@ class SpoolIngestor:
             payload = json.loads(line)
             yield SpoolRecord(
                 ts=datetime.fromisoformat(payload["ts"].replace("Z", "+00:00")),
+                kind=str(payload["kind"]),
+                hour=str(payload["hour"]),
                 db=str(payload["db"]),
-                proc=str(payload["proc"]),
-                delta=int(payload["delta"]),
+                name=str(payload["name"]),
+                count=int(payload["count"]),
+                total_time_ms=int(payload["total_time_ms"]),
+                min_time_ms=int(payload["min_time_ms"]),
+                max_time_ms=int(payload["max_time_ms"]),
             )
 
     def mark_processed(self, claimed_file: ClaimedSpoolFile) -> None:
@@ -114,18 +119,31 @@ class SpoolIngestor:
         )
 
 
-def group_records(records: Iterable[SpoolRecord]) -> dict[tuple[str, str], SpoolRecord]:
-    grouped: dict[tuple[str, str], SpoolRecord] = {}
+def group_records(records: Iterable[SpoolRecord]) -> dict[tuple[str, str, str, str], SpoolRecord]:
+    grouped: dict[tuple[str, str, str, str], SpoolRecord] = {}
 
     for record in records:
-        key = (record.db, record.proc)
+        key = (record.kind, record.hour, record.db, record.name)
         current = grouped.get(key)
 
         if current is None:
-            grouped[key] = SpoolRecord(ts=record.ts, db=record.db, proc=record.proc, delta=record.delta)
+            grouped[key] = SpoolRecord(
+                ts=record.ts,
+                kind=record.kind,
+                hour=record.hour,
+                db=record.db,
+                name=record.name,
+                count=record.count,
+                total_time_ms=record.total_time_ms,
+                min_time_ms=record.min_time_ms,
+                max_time_ms=record.max_time_ms,
+            )
             continue
 
-        current.delta += record.delta
+        current.count += record.count
+        current.total_time_ms += record.total_time_ms
+        current.min_time_ms = min(current.min_time_ms, record.min_time_ms)
+        current.max_time_ms = max(current.max_time_ms, record.max_time_ms)
         if record.ts > current.ts:
             current.ts = record.ts
 

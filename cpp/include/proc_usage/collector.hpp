@@ -12,93 +12,91 @@
 
 namespace proc_usage {
 
-// Ключ, который используется во внутренней таблице счётчиков.
-// Вызовы считаются отдельно для каждой пары:
-// 1. путь к базе данных
-// 2. имя процедуры
-struct ProcedureKey {
+enum class UsageKind {
+    procedure,
+    sql,
+};
+
+// Ключ внутренней таблицы агрегатов.
+// Статистика считается отдельно для типа сущности, базы и имени.
+struct UsageKey {
+    UsageKind kind;
+    std::string usage_hour;
     std::string database;
-    std::string procedure;
+    std::string name;
 
-    bool operator==(const ProcedureKey& other) const = default;
+    bool operator==(const UsageKey& other) const = default;
 };
 
-// Пользовательский хеш для ProcedureKey, чтобы ключ можно было хранить
-// в std::unordered_map.
-// Точная формула не важна для бизнес-логики: мы просто объединяем
-// хеш пути к базе с хешем имени процедуры.
-struct ProcedureKeyHash {
-    std::size_t operator()(const ProcedureKey& key) const noexcept;
+struct UsageKeyHash {
+    std::size_t operator()(const UsageKey& key) const noexcept;
 };
 
-// Одна запись, уже готовая к сбросу на диск.
-// "delta" означает, сколько новых вызовов накопилось с прошлого сброса.
+// Накопленные метрики для одного ключа.
+struct UsageAggregate {
+    std::uint64_t count {0};
+    std::uint64_t total_time_ms {0};
+    std::uint64_t min_time_ms {0};
+    std::uint64_t max_time_ms {0};
+    std::chrono::system_clock::time_point last_seen_at {};
+
+    void observe(
+        std::uint64_t duration_ms,
+        std::chrono::system_clock::time_point observed_at
+    );
+};
+
+// Одна агрегированная запись, готовая к сбросу на диск.
 struct FlushRecord {
     std::chrono::system_clock::time_point timestamp;
+    UsageKind kind;
+    std::string usage_hour;
     std::string database;
-    std::string procedure;
-    std::uint64_t delta;
+    std::string name;
+    std::uint64_t count;
+    std::uint64_t total_time_ms;
+    std::uint64_t min_time_ms;
+    std::uint64_t max_time_ms;
 };
 
-// Абстрактная точка вывода для накопленных записей.
-// Сейчас данные пишутся в JSONL-файлы, но сам коллектор не должен знать,
-// куда именно они отправляются, пока есть реализация этого интерфейса.
 class SpoolWriter {
 public:
     virtual ~SpoolWriter() = default;
     virtual bool write_records(const std::vector<FlushRecord>& records) = 0;
 };
 
-// Центральный накопитель счётчиков в памяти.
-// Firebird вызывает record_call() много раз. Коллектор увеличивает счётчики
-// в RAM и только иногда сбрасывает снимок накопленных данных на диск.
+// Центральный накопитель агрегированной статистики в памяти.
 class UsageCollector {
 public:
     UsageCollector(CollectorConfig config, std::shared_ptr<SpoolWriter> spool_writer);
 
-    // Регистрирует один замеченный вызов процедуры.
-    // Здесь коллектор только увеличивает счётчики в памяти.
-    void record_call(
+    // Регистрирует одно завершённое выполнение процедуры или SQL-запроса.
+    void record_usage(
+        UsageKind kind,
         const std::string& database_path,
-        const std::string& procedure_name,
+        const std::string& name,
+        std::uint64_t duration_ms,
         std::chrono::system_clock::time_point now = std::chrono::system_clock::now()
     );
 
-    // Выполняет сброс только если прошёл настроенный интервал.
     bool flush_if_due(std::chrono::system_clock::time_point now = std::chrono::system_clock::now());
-
-    // Выполняет сброс сразу, даже если интервал ещё не прошёл.
     bool flush_now(std::chrono::system_clock::time_point now = std::chrono::system_clock::now());
 
     std::size_t pending_entry_count() const;
     std::uint64_t pending_total_calls() const;
 
 private:
-    // Таблица вида:
-    //   (база, процедура) -> сколько вызовов уже замечено, но ещё не записано на диск
-    using CounterMap = std::unordered_map<ProcedureKey, std::uint64_t, ProcedureKeyHash>;
+    using AggregateMap = std::unordered_map<UsageKey, UsageAggregate, UsageKeyHash>;
 
     bool should_track_database(const std::string& database_path) const;
-
-    // Выносит текущие счётчики из-под блокировки, чтобы операции записи на диск
-    // не мешали приёму новых событий.
-    CounterMap detach_pending_counters_unlocked();
-
-    std::vector<FlushRecord> build_records(
-        const CounterMap& counters,
-        std::chrono::system_clock::time_point timestamp
-    ) const;
+    AggregateMap detach_pending_aggregates_unlocked();
+    std::vector<FlushRecord> build_records(const AggregateMap& aggregates) const;
 
     CollectorConfig config_;
     std::shared_ptr<SpoolWriter> spool_writer_;
 
-    // Защищает и counters_, и last_flush_at_, потому что к ним одновременно
-    // обращаются рабочие потоки Firebird.
     mutable std::mutex mutex_;
-    CounterMap counters_;
-    // Время последней успешной попытки принять решение о сбросе.
-    // Обновляется и когда данные реально сброшены, и когда мы увидели,
-    // что сбрасывать нечего, чтобы не проверять это на каждом колбэке снова.
+    AggregateMap aggregates_;
     std::chrono::system_clock::time_point last_flush_at_;
 };
 

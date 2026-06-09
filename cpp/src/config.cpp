@@ -36,6 +36,24 @@ std::vector<std::string> split_list(const std::string& value)
     return parts;
 }
 
+bool parse_bool_value(const std::string& raw_value)
+{
+    std::string value = raw_value;
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+
+    if (value == "1" || value == "true" || value == "yes" || value == "on") {
+        return true;
+    }
+
+    if (value == "0" || value == "false" || value == "no" || value == "off") {
+        return false;
+    }
+
+    throw std::runtime_error("Invalid boolean value: " + raw_value);
+}
+
 }  // namespace
 
 CollectorConfig load_collector_config_from_file(const std::filesystem::path& path)
@@ -76,6 +94,9 @@ CollectorConfig load_collector_config_from_file(const std::filesystem::path& pat
         }
         else if (key == "flush_interval_sec") {
             config.flush_interval = std::chrono::seconds(std::stoll(value));
+        }
+        else if (key == "enable_sql_stats") {
+            config.enable_sql_stats = parse_bool_value(value);
         }
         else if (key == "include_databases") {
             config.include_databases = split_list(value);
