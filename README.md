@@ -5,6 +5,15 @@
 - `C++`-ядро сборщика, которое работает рядом с trace-callback'ами Firebird, держит счетчики в памяти и периодически сбрасывает компактные `JSONL`-снимки.
 - `Python`-сервис, который забирает эти снимки, сохраняет агрегированную статистику в `SQLite` и предоставляет небольшой CLI.
 
+В `SQLite` хранятся только агрегаты по каждому UTC-часу:
+
+- `count`
+- `min`
+- `max`
+- `avg` через `total_time_ms / count`
+
+Полный список raw-длительностей не сохраняется, поэтому storage остается компактным даже при высокой нагрузке.
+
 ## Структура Репозитория
 
 - `cpp/` - ядро сборщика, парсер конфигурации, writer для spool-файлов и каркас Firebird bridge
@@ -84,6 +93,22 @@ python3 -m proc_usage show SELECT --config configs/python_service.json --kind sq
 ```bash
 python3 -m proc_usage show MY_PROC --config configs/python_service.json --hour 2026-06-06T12:00Z
 ```
+
+Пример вывода `top` после ingest:
+
+```text
+        12  2026-06-09T07:00Z  /db/main.fdb  PROC_A  min=1ms  avg=2.50ms  max=8ms  2026-06-09T07:31:16+00:00
+         8  2026-06-09T07:00Z  /db/main.fdb  SELECT  min=0ms  avg=0.75ms  max=3ms  2026-06-09T07:31:17+00:00
+```
+
+Здесь выводятся:
+
+- число вызовов за час
+- UTC-час агрегирования
+- база данных
+- имя процедуры или тип SQL
+- `min/avg/max` по времени выполнения
+- время последнего наблюдения `last_seen_at`
 
 ## Сборка `C++`-Части
 
