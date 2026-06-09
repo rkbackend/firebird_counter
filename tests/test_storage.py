@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -131,6 +132,56 @@ class SQLiteUsageStorageTests(unittest.TestCase):
             self.assertEqual(rows[0]["min_time_ms"], 3)
             self.assertEqual(rows[0]["max_time_ms"], 12)
             self.assertAlmostEqual(rows[0]["avg_time_ms"], 6.4)
+
+    def test_sql_text_stats_are_stored_by_fingerprint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            database_path = Path(tmp_dir) / "stats.sqlite3"
+            storage = SQLiteUsageStorage(database_path)
+            storage.initialize()
+            sql_text = "SELECT * FROM BENCH_DATA WHERE ID = 42"
+            fingerprint = hashlib.sha256(sql_text.encode("utf-8")).hexdigest()
+
+            storage.apply_deltas(
+                [
+                    SpoolRecord(
+                        ts=datetime(2026, 6, 6, 12, 0, 0, tzinfo=timezone.utc),
+                        kind="sql_text",
+                        hour="2026-06-06T12:00Z",
+                        db="/db/main.fdb",
+                        name=sql_text,
+                        count=2,
+                        total_time_ms=30,
+                        min_time_ms=10,
+                        max_time_ms=20,
+                    ),
+                    SpoolRecord(
+                        ts=datetime(2026, 6, 6, 12, 0, 5, tzinfo=timezone.utc),
+                        kind="sql_text",
+                        hour="2026-06-06T12:00Z",
+                        db="/db/main.fdb",
+                        name=sql_text,
+                        count=1,
+                        total_time_ms=25,
+                        min_time_ms=25,
+                        max_time_ms=25,
+                    ),
+                ]
+            )
+
+            rows = storage.top_usage(kind="sql-text", usage_hour="2026-06-06T12:00Z")
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["name"], fingerprint)
+            self.assertEqual(rows[0]["sql_text"], sql_text)
+            self.assertEqual(rows[0]["total_calls"], 3)
+            self.assertEqual(rows[0]["total_time_ms"], 55)
+            self.assertEqual(rows[0]["min_time_ms"], 10)
+            self.assertEqual(rows[0]["max_time_ms"], 25)
+            self.assertAlmostEqual(rows[0]["avg_time_ms"], 55 / 3)
+
+            stats_rows = storage.usage_stats(kind="sql-text", name=fingerprint, usage_hour="2026-06-06T12:00Z")
+            self.assertEqual(len(stats_rows), 1)
+            self.assertEqual(stats_rows[0]["sql_text"], sql_text)
+            self.assertEqual(storage.sql_text_by_fingerprint(fingerprint), sql_text)
 
 
 if __name__ == "__main__":

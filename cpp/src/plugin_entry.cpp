@@ -322,6 +322,10 @@ CollectorConfig load_collector_config_from_plugin(
         config.enable_sql_stats = parse_bool_value(enable_sql_stats);
     }
 
+    if (const std::string enable_sql_text_stats = get_entry_value(raw_config.get(), status, "enable_sql_text_stats"); !enable_sql_text_stats.empty()) {
+        config.enable_sql_text_stats = parse_bool_value(enable_sql_text_stats);
+    }
+
     if (const std::string include = get_entry_value(raw_config.get(), status, "include_databases"); !include.empty()) {
         config.include_databases = split_filter_list(include);
     }
@@ -403,6 +407,7 @@ class ProcUsageTracePlugin final
 public:
     explicit ProcUsageTracePlugin(CollectorConfig config)
         : enable_sql_stats_(config.enable_sql_stats),
+          enable_sql_text_stats_(config.enable_sql_text_stats),
           debug_log_(std::make_shared<DebugLog>(config.debug_log_path)),
           spool_dir_(config.spool_dir),
           writer_(std::make_shared<JsonlSpoolWriter>(spool_dir_)),
@@ -554,7 +559,7 @@ public:
     {
         // SQL-статистика включается отдельно. И, как у процедур, meaningful
         // timing доступен только на finish-событии, а не на старте.
-        if (!enable_sql_stats_ || started || connection == nullptr || statement == nullptr) {
+        if ((!enable_sql_stats_ && !enable_sql_text_stats_) || started || connection == nullptr || statement == nullptr) {
             return true;
         }
 
@@ -566,7 +571,9 @@ public:
             bridge_.on_sql_finish(
                 database_name == nullptr ? std::string_view() : std::string_view(database_name),
                 sql_text == nullptr ? std::string_view() : std::string_view(sql_text),
-                duration_ms
+                duration_ms,
+                enable_sql_stats_,
+                enable_sql_text_stats_
             );
             debug_log_->write(
                 "trace_dsql_execute finish db=" +
@@ -678,6 +685,7 @@ private:
     }
 
     bool enable_sql_stats_ {false};
+    bool enable_sql_text_stats_ {false};
     // Общий отладочный лог для этого экземпляра плагина.
     std::shared_ptr<DebugLog> debug_log_;
     // Хранится в основном для логов и удобства просмотра;
@@ -734,10 +742,14 @@ public:
         // и события жизненного цикла, которые нужны для сброса счётчиков.
         // Это уменьшает лишний trace-шум и не заставляет плагин получать
         // те события, которые он всё равно не обрабатывает.
-        return (ISC_UINT64{1} << ITraceFactory::TRACE_EVENT_PROC_EXECUTE) |
-               (ISC_UINT64{1} << ITraceFactory::TRACE_EVENT_TRANSACTION_END) |
-               (ISC_UINT64{1} << ITraceFactory::TRACE_EVENT_DETACH) |
-               (ISC_UINT64{1} << ITraceFactory::TRACE_EVENT_SERVICE_DETACH);
+        ISC_UINT64 flags = (ISC_UINT64{1} << ITraceFactory::TRACE_EVENT_PROC_EXECUTE) |
+                           (ISC_UINT64{1} << ITraceFactory::TRACE_EVENT_TRANSACTION_END) |
+                           (ISC_UINT64{1} << ITraceFactory::TRACE_EVENT_DETACH) |
+                           (ISC_UINT64{1} << ITraceFactory::TRACE_EVENT_SERVICE_DETACH);
+        if (config_.enable_sql_stats || config_.enable_sql_text_stats) {
+            flags |= (ISC_UINT64{1} << ITraceFactory::TRACE_EVENT_DSQL_EXECUTE);
+        }
+        return flags;
     }
 
     ITracePlugin* trace_create(ThrowStatusWrapper*, ITraceInitInfo*) override

@@ -15,6 +15,7 @@ from bench.run_benchmark import (
     _build_parser,
     parse_plugin_settings,
     render_firebird_conf,
+    render_plugin_conf,
 )
 
 
@@ -81,6 +82,8 @@ class BenchmarkConfigTests(unittest.TestCase):
                         "  spool_dir = /tmp/firebird_proc_usage_spool",
                         "  debug_log_path = /tmp/proc_usage_trace_debug.log",
                         "  flush_interval_sec = 5",
+                        "  enable_sql_stats = true",
+                        "  enable_sql_text_stats = false",
                         "}",
                     ]
                 ),
@@ -91,6 +94,29 @@ class BenchmarkConfigTests(unittest.TestCase):
             self.assertEqual(settings.spool_dir, Path("/tmp/firebird_proc_usage_spool"))
             self.assertEqual(settings.debug_log_path, Path("/tmp/proc_usage_trace_debug.log"))
             self.assertEqual(settings.flush_interval_sec, 5)
+            self.assertTrue(settings.enable_sql_stats)
+            self.assertFalse(settings.enable_sql_text_stats)
+
+    def test_render_plugin_conf_appends_managed_override_block(self) -> None:
+        source = "\n".join(
+            [
+                "Config = ProcUsageTraceConfig {",
+                "  spool_dir = /tmp/firebird_proc_usage_spool",
+                "  enable_sql_stats = false",
+                "}",
+            ]
+        )
+
+        rendered = render_plugin_conf(
+            source,
+            enable_sql_stats=True,
+            enable_sql_text_stats=True,
+        )
+
+        self.assertIn("Config = ProcUsageTraceConfig {", rendered)
+        self.assertIn("  enable_sql_stats = true", rendered)
+        self.assertIn("  enable_sql_text_stats = true", rendered)
+        self.assertEqual(rendered.count("enable_sql_stats"), 1)
 
 
 class BenchmarkRunnerTests(unittest.TestCase):
@@ -107,6 +133,8 @@ class BenchmarkRunnerTests(unittest.TestCase):
                     "Config = ProcUsageTraceConfig {",
                     f"  spool_dir = {spool_dir}",
                     "  flush_interval_sec = 2",
+                    "  enable_sql_stats = true",
+                    "  enable_sql_text_stats = false",
                     "}",
                 ]
             ),
@@ -123,6 +151,7 @@ class BenchmarkRunnerTests(unittest.TestCase):
             calibration_rounds=10,
             min_rounds_per_client=5,
             iterations=2,
+            plugin_profile="aggregates",
             user="sysdba",
             password="masterkey",
             service_name="firebird3.0",
@@ -169,6 +198,54 @@ class BenchmarkRunnerTests(unittest.TestCase):
             self.assertEqual(total_calls, 21)
             self.assertEqual(distinct_procedures, 2)
 
+    def test_read_observed_sql_text_stats_counts_catalog_and_hour_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            runner = self._make_runner(Path(tmp_dir))
+
+            with sqlite3.connect(runner.sqlite_db_path) as connection:
+                connection.execute(
+                    """
+                    CREATE TABLE sql_text_catalog (
+                        fingerprint TEXT NOT NULL PRIMARY KEY,
+                        sql_text TEXT NOT NULL
+                    )
+                    """
+                )
+                connection.execute(
+                    """
+                    CREATE TABLE sql_text_usage_stats (
+                        usage_hour TEXT NOT NULL,
+                        database TEXT NOT NULL,
+                        sql_fingerprint TEXT NOT NULL
+                    )
+                    """
+                )
+                connection.executemany(
+                    """
+                    INSERT INTO sql_text_catalog (fingerprint, sql_text)
+                    VALUES (?, ?)
+                    """,
+                    [
+                        ("fp_1", "SELECT 1 FROM RDB$DATABASE"),
+                        ("fp_2", "SELECT 2 FROM RDB$DATABASE"),
+                    ],
+                )
+                connection.executemany(
+                    """
+                    INSERT INTO sql_text_usage_stats (usage_hour, database, sql_fingerprint)
+                    VALUES (?, ?, ?)
+                    """,
+                    [
+                        ("2026-06-09T10:00Z", "/db/main.fdb", "fp_1"),
+                        ("2026-06-09T10:00Z", "/db/main.fdb", "fp_2"),
+                        ("2026-06-09T11:00Z", "/db/main.fdb", "fp_1"),
+                    ],
+                )
+
+            fingerprint_count, hour_rows = runner._read_observed_sql_text_stats()
+            self.assertEqual(fingerprint_count, 2)
+            self.assertEqual(hour_rows, 3)
+
     def test_build_execution_plan_alternates_modes_in_both_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             runner = self._make_runner(Path(tmp_dir))
@@ -207,9 +284,13 @@ class BenchmarkRunnerTests(unittest.TestCase):
                         sql_runtime_sec=10.0,
                         ingest_runtime_sec=None,
                         spool_file_count=0,
+                        spool_size_bytes=0,
+                        sqlite_db_size_bytes=4096,
                         expected_execute_procedure_calls=560,
                         observed_execute_procedure_calls=None,
                         distinct_procedures_observed=None,
+                        observed_sql_text_fingerprints=None,
+                        observed_sql_text_hour_rows=None,
                         valid=True,
                         note="ok",
                     )
@@ -218,6 +299,8 @@ class BenchmarkRunnerTests(unittest.TestCase):
                 min_sql_runtime_sec=9.5,
                 avg_ingest_runtime_sec=None,
                 min_ingest_runtime_sec=None,
+                avg_spool_size_bytes=0.0,
+                avg_sqlite_db_size_bytes=4096.0,
             )
             with_plugin = ModeResult(
                 mode="with_plugin",
@@ -228,9 +311,13 @@ class BenchmarkRunnerTests(unittest.TestCase):
                         sql_runtime_sec=11.5,
                         ingest_runtime_sec=0.7,
                         spool_file_count=3,
+                        spool_size_bytes=8192,
+                        sqlite_db_size_bytes=16384,
                         expected_execute_procedure_calls=560,
                         observed_execute_procedure_calls=560,
                         distinct_procedures_observed=10,
+                        observed_sql_text_fingerprints=25,
+                        observed_sql_text_hour_rows=40,
                         valid=True,
                         note="ok",
                     )
@@ -239,6 +326,8 @@ class BenchmarkRunnerTests(unittest.TestCase):
                 min_sql_runtime_sec=11.0,
                 avg_ingest_runtime_sec=0.7,
                 min_ingest_runtime_sec=0.6,
+                avg_spool_size_bytes=8192.0,
+                avg_sqlite_db_size_bytes=16384.0,
             )
 
             report = runner._build_report(
@@ -270,12 +359,15 @@ class BenchmarkRunnerTests(unittest.TestCase):
             self.assertEqual(report["comparison"]["ingest_delta_sec"], 0.7)
             self.assertIsNone(report["comparison"]["ingest_delta_pct"])
             self.assertEqual(report["plugin_settings"]["flush_interval_sec"], 2)
+            self.assertEqual(report["plugin_profile"], "aggregates")
+            self.assertFalse(report["plugin_settings"]["enable_sql_text_stats"])
 
     def test_parser_uses_five_iterations_by_default(self) -> None:
         parser = _build_parser()
         args = parser.parse_args(["--user", "sysdba", "--password", "masterkey"])
 
         self.assertEqual(args.iterations, 5)
+        self.assertEqual(args.plugin_profile, "aggregates")
 
 
 if __name__ == "__main__":

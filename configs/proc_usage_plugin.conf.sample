@@ -10,6 +10,10 @@ flush_interval_sec = 30
 # По умолчанию собираем timing и обычных SQL statement'ов, и процедур.
 enable_sql_stats = true
 
+# Полные тексты SQL храним отдельно и выключаем по умолчанию, чтобы не
+# раздувать spool и SQLite без явного решения.
+enable_sql_text_stats = false
+
 # Необязательный allow-list фрагментов пути к БД, разделенных `;`.
 # Оставьте пустым, чтобы учитывать все базы.
 include_databases =

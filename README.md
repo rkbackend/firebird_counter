@@ -200,6 +200,12 @@ python3 -m proc_usage top --config configs/python_service.json --hour 2026-06-06
 python3 -m proc_usage top --config configs/python_service.json --kind sql --limit 10
 ```
 
+Покажите самые тяжёлые полные SQL-тексты:
+
+```bash
+python3 -m proc_usage top --config configs/python_service.json --kind sql-text --limit 10
+```
+
 Покажите статистику по одной процедуре:
 
 ```bash
@@ -210,6 +216,12 @@ python3 -m proc_usage show MY_PROC --config configs/python_service.json
 
 ```bash
 python3 -m proc_usage show SELECT --config configs/python_service.json --kind sql
+```
+
+Покажите статистику и полный текст по одному SQL fingerprint:
+
+```bash
+python3 -m proc_usage show <sql_fingerprint> --config configs/python_service.json --kind sql-text
 ```
 
 Или по одному UTC-часу:
@@ -230,7 +242,7 @@ python3 -m proc_usage show MY_PROC --config configs/python_service.json --hour 2
 - число вызовов за час
 - UTC-час агрегирования
 - база данных
-- имя процедуры или тип SQL
+- имя процедуры, тип SQL или fingerprint полного SQL
 - `min/avg/max` по времени выполнения
 - время последнего наблюдения `last_seen_at`
 
@@ -367,7 +379,7 @@ Python-код лучше оставлять в стандартном `site-pack
 
 Плагин регистрируется внутри библиотеки под именем `ProcUsageTrace`.
 
-Ключевая точка интеграции - класс `proc_usage::firebird::FirebirdTraceBridge`. Trace plugin Firebird передает в ядро завершенные события `trace_proc_execute(started=false)` и, при включенном `enable_sql_stats`, `trace_dsql_execute(started=false)`, не добавляя запись в БД прямо в request path.
+Ключевая точка интеграции - класс `proc_usage::firebird::FirebirdTraceBridge`. Trace plugin Firebird передает в ядро завершенные события `trace_proc_execute(started=false)` и, при включенном `enable_sql_stats` или `enable_sql_text_stats`, `trace_dsql_execute(started=false)`, не добавляя запись в БД прямо в request path.
 
 Конфигурацию сборщика можно передать двумя способами:
 
@@ -395,6 +407,7 @@ spool_dir = /tmp/firebird_proc_usage_spool
 debug_log_path = /tmp/proc_usage_trace_debug.log
 flush_interval_sec = 5
 enable_sql_stats = true
+enable_sql_text_stats = false
 include_databases =
 exclude_databases =
 ```

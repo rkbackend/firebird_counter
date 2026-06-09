@@ -63,17 +63,33 @@ void FirebirdTraceBridge::on_sql_finish(
     std::string_view database_path,
     std::string_view sql_text,
     std::uint64_t duration_ms,
+    bool collect_sql_kind,
+    bool collect_sql_text,
     std::chrono::system_clock::time_point now
 )
 {
-    const std::string sql_kind = classify_sql_statement(sql_text);
-    collector_.record_usage(
-        UsageKind::sql,
-        std::string(database_path),
-        sql_kind,
-        duration_ms,
-        now
-    );
+    const std::string database(database_path);
+
+    if (collect_sql_kind) {
+        const std::string sql_kind = classify_sql_statement(sql_text);
+        collector_.record_usage(
+            UsageKind::sql,
+            database,
+            sql_kind,
+            duration_ms,
+            now
+        );
+    }
+
+    if (collect_sql_text && !sql_text.empty()) {
+        collector_.record_usage(
+            UsageKind::sql_text,
+            database,
+            std::string(sql_text),
+            duration_ms,
+            now
+        );
+    }
 }
 
 std::string FirebirdTraceBridge::trim_identifier(std::string_view text)

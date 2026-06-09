@@ -24,6 +24,8 @@ public:
         std::string_view database_path,
         std::string_view sql_text,
         std::uint64_t duration_ms,
+        bool collect_sql_kind,
+        bool collect_sql_text,
         std::chrono::system_clock::time_point now = std::chrono::system_clock::now()
     );
 

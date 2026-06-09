@@ -17,6 +17,8 @@ enum class UsageKind {
     procedure,
     // Обычный SQL statement, попавший в trace API Firebird.
     sql,
+    // Полный текст SQL statement'а без нормализации.
+    sql_text,
 };
 
 // Ключ внутренней таблицы агрегатов.

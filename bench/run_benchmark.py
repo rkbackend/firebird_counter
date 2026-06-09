@@ -35,6 +35,8 @@ class PluginSettings:
     spool_dir: Path
     flush_interval_sec: int
     debug_log_path: Optional[Path]
+    enable_sql_stats: bool
+    enable_sql_text_stats: bool
 
 
 @dataclass
@@ -43,9 +45,13 @@ class IterationResult:
     sql_runtime_sec: float
     ingest_runtime_sec: Optional[float]
     spool_file_count: int
+    spool_size_bytes: int
+    sqlite_db_size_bytes: int
     expected_execute_procedure_calls: int
     observed_execute_procedure_calls: Optional[int]
     distinct_procedures_observed: Optional[int]
+    observed_sql_text_fingerprints: Optional[int]
+    observed_sql_text_hour_rows: Optional[int]
     valid: bool
     note: str
 
@@ -59,12 +65,16 @@ class ModeResult:
     min_sql_runtime_sec: float
     avg_ingest_runtime_sec: Optional[float]
     min_ingest_runtime_sec: Optional[float]
+    avg_spool_size_bytes: float
+    avg_sqlite_db_size_bytes: float
 
 
 def parse_plugin_settings(plugin_conf_path: Path) -> PluginSettings:
     spool_dir: Optional[Path] = None
     debug_log_path: Optional[Path] = None
     flush_interval_sec = 1
+    enable_sql_stats = False
+    enable_sql_text_stats = False
 
     for raw_line in plugin_conf_path.read_text(encoding="utf-8").splitlines():
         line = raw_line.split("#", 1)[0].strip()
@@ -77,6 +87,10 @@ def parse_plugin_settings(plugin_conf_path: Path) -> PluginSettings:
             debug_log_path = Path(value)
         elif key == "flush_interval_sec" and value:
             flush_interval_sec = int(value)
+        elif key == "enable_sql_stats" and value:
+            enable_sql_stats = value.lower() in {"1", "true", "yes", "on"}
+        elif key == "enable_sql_text_stats" and value:
+            enable_sql_text_stats = value.lower() in {"1", "true", "yes", "on"}
 
     if spool_dir is None:
         raise ValueError(f"Не удалось найти spool_dir в {plugin_conf_path}")
@@ -85,6 +99,8 @@ def parse_plugin_settings(plugin_conf_path: Path) -> PluginSettings:
         spool_dir=spool_dir,
         flush_interval_sec=flush_interval_sec,
         debug_log_path=debug_log_path,
+        enable_sql_stats=enable_sql_stats,
+        enable_sql_text_stats=enable_sql_text_stats,
     )
 
 
@@ -111,6 +127,44 @@ def render_firebird_conf(base_content: str, enable_plugin: bool, plugin_name: st
         filtered_lines.append("# Trace plugin временно отключен для benchmark baseline")
         filtered_lines.append("# AuditTraceConfigFile временно отключен для benchmark baseline")
     filtered_lines.append("# END PROC_USAGE_BENCHMARK")
+    return "\n".join(filtered_lines) + "\n"
+
+
+def render_plugin_conf(base_content: str, *, enable_sql_stats: bool, enable_sql_text_stats: bool) -> str:
+    filtered_lines: list[str] = []
+    inside_proc_usage_config = False
+    inserted_flags = False
+
+    for line in base_content.splitlines():
+        stripped = line.strip()
+
+        if not inside_proc_usage_config and stripped.startswith("Config = ProcUsageTraceConfig") and stripped.endswith("{"):
+            inside_proc_usage_config = True
+            filtered_lines.append(line)
+            continue
+
+        if inside_proc_usage_config:
+            if stripped.startswith("enable_sql_stats") or stripped.startswith("enable_sql_text_stats"):
+                continue
+
+            if stripped == "}":
+                filtered_lines.extend(
+                    [
+                        f"  enable_sql_stats = {'true' if enable_sql_stats else 'false'}",
+                        f"  enable_sql_text_stats = {'true' if enable_sql_text_stats else 'false'}",
+                    ]
+                )
+                inserted_flags = True
+                inside_proc_usage_config = False
+
+            filtered_lines.append(line)
+            continue
+
+        filtered_lines.append(line)
+
+    if not inserted_flags:
+        raise ValueError("Не удалось найти блок Config = ProcUsageTraceConfig в plugins.conf")
+
     return "\n".join(filtered_lines) + "\n"
 
 
@@ -162,7 +216,8 @@ class FirebirdBenchmarkRunner:
         self.benchmark_db_file = Path("/tmp") / f"firebird_benchmark_{self.run_id}.fdb"
         self.connection_database = f"{self.host}/{self.port}:{self.benchmark_db_file}"
         self.original_firebird_conf = self.firebird_conf_path.read_text(encoding="utf-8")
-        self.active_plugin_state: Optional[bool] = None
+        self.original_plugin_conf = self.plugin_conf_path.read_text(encoding="utf-8")
+        self.active_runtime_state: Optional[tuple[bool, bool, bool]] = None
 
     def preflight(self) -> None:
         if shutil.which("isql-fb") is None:
@@ -179,6 +234,13 @@ class FirebirdBenchmarkRunner:
                 raise RuntimeError(f"Плагин не найден: {plugin_binary}")
         if self.args.user is None or self.args.password is None:
             raise RuntimeError("Нужны --user и --password для подключения к Firebird")
+        if self.args.mode in {"with_plugin", "both"}:
+            trace_conf_text = self.audit_trace_conf.read_text(encoding="utf-8")
+            if self._plugin_sql_stats_enabled() or self._plugin_sql_text_stats_enabled():
+                if "log_statement_finish = true" not in trace_conf_text:
+                    raise RuntimeError("Для SQL benchmark нужен log_statement_finish = true в trace config")
+            if "log_procedure_finish = true" not in trace_conf_text:
+                raise RuntimeError("Для benchmark нужен log_procedure_finish = true в trace config")
 
     def run(self) -> dict[str, object]:
         self.preflight()
@@ -254,6 +316,12 @@ class FirebirdBenchmarkRunner:
             return ["without_plugin", "with_plugin"]
         return [self.args.mode]
 
+    def _plugin_sql_stats_enabled(self) -> bool:
+        return True
+
+    def _plugin_sql_text_stats_enabled(self) -> bool:
+        return self.args.plugin_profile == "sql_text"
+
     def _iteration_mode_order(self, iteration: int) -> list[str]:
         modes = self._target_modes()
         if self.args.mode != "both":
@@ -305,16 +373,21 @@ class FirebirdBenchmarkRunner:
         sql_runtime_sec = self._run_client_scripts(artifacts=artifacts, label=f"{mode}-iter-{iteration}")
         ingest_runtime_sec: Optional[float] = None
         spool_file_count = self._count_spool_files()
+        spool_size_bytes = self._spool_size_bytes()
         observed_calls: Optional[int] = None
         distinct_procs: Optional[int] = None
+        observed_sql_text_fingerprints: Optional[int] = None
+        observed_sql_text_hour_rows: Optional[int] = None
         valid = True
         note = "ok"
 
         if enable_plugin:
             time.sleep(self.plugin_settings.flush_interval_sec * 2)
             spool_file_count = self._count_spool_files()
+            spool_size_bytes = self._spool_size_bytes()
             ingest_runtime_sec = self._run_ingest_once()
             observed_calls, distinct_procs = self._read_observed_call_stats()
+            observed_sql_text_fingerprints, observed_sql_text_hour_rows = self._read_observed_sql_text_stats()
             if observed_calls != artifacts.expected_execute_procedure_calls:
                 valid = False
                 note = (
@@ -324,6 +397,9 @@ class FirebirdBenchmarkRunner:
             elif spool_file_count <= 0:
                 valid = False
                 note = "plugin mode finished without spool files"
+            elif self._plugin_sql_text_stats_enabled() and observed_sql_text_fingerprints <= 0:
+                valid = False
+                note = "sql_text profile finished without sql_text rows"
         else:
             if spool_file_count != 0:
                 valid = False
@@ -334,9 +410,13 @@ class FirebirdBenchmarkRunner:
             sql_runtime_sec=sql_runtime_sec,
             ingest_runtime_sec=ingest_runtime_sec,
             spool_file_count=spool_file_count,
+            spool_size_bytes=spool_size_bytes,
+            sqlite_db_size_bytes=self._sqlite_db_size_bytes(),
             expected_execute_procedure_calls=artifacts.expected_execute_procedure_calls,
             observed_execute_procedure_calls=observed_calls,
             distinct_procedures_observed=distinct_procs,
+            observed_sql_text_fingerprints=observed_sql_text_fingerprints,
+            observed_sql_text_hour_rows=observed_sql_text_hour_rows,
             valid=valid,
             note=note,
         )
@@ -350,6 +430,8 @@ class FirebirdBenchmarkRunner:
     ) -> ModeResult:
         sql_values = [item.sql_runtime_sec for item in iterations]
         ingest_values = [item.ingest_runtime_sec for item in iterations if item.ingest_runtime_sec is not None]
+        spool_sizes = [item.spool_size_bytes for item in iterations]
+        sqlite_sizes = [item.sqlite_db_size_bytes for item in iterations]
         return ModeResult(
             mode=mode,
             rounds_per_client=rounds_per_client,
@@ -358,6 +440,8 @@ class FirebirdBenchmarkRunner:
             min_sql_runtime_sec=min(sql_values),
             avg_ingest_runtime_sec=(sum(ingest_values) / len(ingest_values)) if ingest_values else None,
             min_ingest_runtime_sec=min(ingest_values) if ingest_values else None,
+            avg_spool_size_bytes=sum(spool_sizes) / len(spool_sizes),
+            avg_sqlite_db_size_bytes=sum(sqlite_sizes) / len(sqlite_sizes),
         )
 
     def _write_artifacts(self, rounds_per_client: int, label: str = "main") -> GeneratedBenchmark:
@@ -413,6 +497,12 @@ class FirebirdBenchmarkRunner:
         patterns = ("*.jsonl", "*.processing")
         return sum(1 for pattern in patterns for _ in self.plugin_settings.spool_dir.glob(pattern))
 
+    def _spool_size_bytes(self) -> int:
+        if not self.plugin_settings.spool_dir.exists():
+            return 0
+        patterns = ("*.jsonl", "*.processing")
+        return sum(path.stat().st_size for pattern in patterns for path in self.plugin_settings.spool_dir.glob(pattern))
+
     def _read_observed_call_stats(self) -> tuple[int, int]:
         with sqlite3.connect(self.sqlite_db_path) as connection:
             total_calls = connection.execute(
@@ -430,6 +520,27 @@ class FirebirdBenchmarkRunner:
                 """
             ).fetchone()[0]
         return int(total_calls), int(distinct_procedures)
+
+    def _read_observed_sql_text_stats(self) -> tuple[int, int]:
+        with sqlite3.connect(self.sqlite_db_path) as connection:
+            fingerprint_count = connection.execute(
+                """
+                SELECT COUNT(*)
+                FROM sql_text_catalog
+                """
+            ).fetchone()[0]
+            hour_rows = connection.execute(
+                """
+                SELECT COUNT(*)
+                FROM sql_text_usage_stats
+                """
+            ).fetchone()[0]
+        return int(fingerprint_count), int(hour_rows)
+
+    def _sqlite_db_size_bytes(self) -> int:
+        if not self.sqlite_db_path.exists():
+            return 0
+        return self.sqlite_db_path.stat().st_size
 
     def _measure_sql_runtime(self, rounds_per_client: int, label: str) -> float:
         artifacts = self._write_artifacts(rounds_per_client=rounds_per_client, label=label)
@@ -523,7 +634,11 @@ class FirebirdBenchmarkRunner:
             self._safe_unlink(path)
 
     def _ensure_mode(self, enable_plugin: bool) -> None:
-        if self.active_plugin_state is enable_plugin:
+        enable_sql_stats = self._plugin_sql_stats_enabled() if enable_plugin else False
+        enable_sql_text_stats = self._plugin_sql_text_stats_enabled() if enable_plugin else False
+        requested_state = (enable_plugin, enable_sql_stats, enable_sql_text_stats)
+
+        if self.active_runtime_state == requested_state:
             return
 
         rendered = render_firebird_conf(
@@ -536,16 +651,30 @@ class FirebirdBenchmarkRunner:
             candidate = Path(tmp_dir) / "firebird.conf"
             candidate.write_text(rendered, encoding="utf-8")
             self._copy_with_privileges(candidate, self.firebird_conf_path)
+
+        rendered_plugin_conf = render_plugin_conf(
+            self.original_plugin_conf,
+            enable_sql_stats=enable_sql_stats,
+            enable_sql_text_stats=enable_sql_text_stats,
+        )
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            candidate = Path(tmp_dir) / "proc_usage_plugin.conf"
+            candidate.write_text(rendered_plugin_conf, encoding="utf-8")
+            self._copy_with_privileges(candidate, self.plugin_conf_path)
         self._restart_firebird_service()
-        self.active_plugin_state = enable_plugin
+        self.active_runtime_state = requested_state
 
     def _restore_firebird_conf(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             candidate = Path(tmp_dir) / "firebird.conf"
             candidate.write_text(self.original_firebird_conf, encoding="utf-8")
             self._copy_with_privileges(candidate, self.firebird_conf_path)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            candidate = Path(tmp_dir) / "proc_usage_plugin.conf"
+            candidate.write_text(self.original_plugin_conf, encoding="utf-8")
+            self._copy_with_privileges(candidate, self.plugin_conf_path)
         self._restart_firebird_service()
-        self.active_plugin_state = None
+        self.active_runtime_state = None
 
     def _copy_with_privileges(self, source: Path, destination: Path) -> None:
         command = [*self.sudo_prefix, "install", "-m", "0644", str(source), str(destination)]
@@ -607,10 +736,13 @@ class FirebirdBenchmarkRunner:
             "spool_dir": str(self.plugin_settings.spool_dir),
             "flush_interval_sec": self.plugin_settings.flush_interval_sec,
             "debug_log_path": str(self.plugin_settings.debug_log_path) if self.plugin_settings.debug_log_path else None,
+            "enable_sql_stats": self._plugin_sql_stats_enabled(),
+            "enable_sql_text_stats": self._plugin_sql_text_stats_enabled(),
         }
 
         return {
             "started_at": started_at.isoformat(),
+            "plugin_profile": self.args.plugin_profile,
             "target_runtime_sec": self.args.target_runtime_sec,
             "calibration_rounds": self.args.calibration_rounds,
             "calibration_runtime_sec": calibration_runtime,
@@ -647,16 +779,18 @@ class FirebirdBenchmarkRunner:
         raise PermissionError("Не удалось записать benchmark report ни в bench/results, ни в workspace/results")
 
     def _print_report(self, report: dict[str, object]) -> None:
-        print("Mode            Avg SQL (s)   Min SQL (s)   Avg Ingest (s)   Valid/Total")
-        print("-----------------------------------------------------------------------")
+        print("Mode            Avg SQL (s)   Min SQL (s)   Avg Ingest (s)   Avg Spool KB   Avg SQLite KB   Valid/Total")
+        print("-----------------------------------------------------------------------------------------------------------")
         for mode, payload in report["results"].items():
             iterations = payload["iterations"]
             valid_count = sum(1 for item in iterations if item["valid"])
             avg_ingest = payload["avg_ingest_runtime_sec"]
             avg_ingest_display = f"{avg_ingest:>14.3f}" if avg_ingest is not None else f"{'-':>14}"
+            avg_spool_kb = payload["avg_spool_size_bytes"] / 1024.0
+            avg_sqlite_kb = payload["avg_sqlite_db_size_bytes"] / 1024.0
             print(
                 f"{mode:<15} {payload['avg_sql_runtime_sec']:>11.3f} {payload['min_sql_runtime_sec']:>13.3f}"
-                f" {avg_ingest_display} {valid_count:>5}/{len(iterations):<5}"
+                f" {avg_ingest_display} {avg_spool_kb:>14.1f} {avg_sqlite_kb:>15.1f} {valid_count:>5}/{len(iterations):<5}"
             )
 
         comparison = report["comparison"]
@@ -671,6 +805,7 @@ class FirebirdBenchmarkRunner:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run a local Firebird benchmark with and without ProcUsageTrace.")
     parser.add_argument("--mode", choices=["without_plugin", "with_plugin", "both"], default="both")
+    parser.add_argument("--plugin-profile", choices=["aggregates", "sql_text"], default="aggregates")
     parser.add_argument("--workspace-root", default="/tmp/firebird_proc_usage_benchmark")
     parser.add_argument("--client-count", type=int, default=64)
     parser.add_argument("--procedure-count", type=int, default=1000)

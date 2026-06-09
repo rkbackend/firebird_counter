@@ -104,6 +104,9 @@ CollectorConfig load_collector_config_from_file(const std::filesystem::path& pat
         else if (key == "enable_sql_stats") {
             config.enable_sql_stats = parse_bool_value(value);
         }
+        else if (key == "enable_sql_text_stats") {
+            config.enable_sql_text_stats = parse_bool_value(value);
+        }
         else if (key == "include_databases") {
             config.include_databases = split_list(value);
         }

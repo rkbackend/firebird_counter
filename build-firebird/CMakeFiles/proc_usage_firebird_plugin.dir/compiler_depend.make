@@ -10,6 +10,7 @@ CMakeFiles/proc_usage_firebird_plugin.dir/cpp/src/plugin_entry.cpp.o: /home/j8r/
   /usr/include/asm-generic/errno-base.h \
   /usr/include/asm-generic/errno.h \
   /usr/include/assert.h \
+  /usr/include/c++/13/algorithm \
   /usr/include/c++/13/array \
   /usr/include/c++/13/atomic \
   /usr/include/c++/13/backward/auto_ptr.h \
@@ -78,6 +79,7 @@ CMakeFiles/proc_usage_firebird_plugin.dir/cpp/src/plugin_entry.cpp.o: /home/j8r/
   /usr/include/c++/13/bits/ptr_traits.h \
   /usr/include/c++/13/bits/quoted_string.h \
   /usr/include/c++/13/bits/range_access.h \
+  /usr/include/c++/13/bits/ranges_algo.h \
   /usr/include/c++/13/bits/ranges_algobase.h \
   /usr/include/c++/13/bits/ranges_base.h \
   /usr/include/c++/13/bits/ranges_cmp.h \
@@ -161,6 +163,7 @@ CMakeFiles/proc_usage_firebird_plugin.dir/cpp/src/plugin_entry.cpp.o: /home/j8r/
   /usr/include/c++/13/optional \
   /usr/include/c++/13/ostream \
   /usr/include/c++/13/pstl/execution_defs.h \
+  /usr/include/c++/13/pstl/glue_algorithm_defs.h \
   /usr/include/c++/13/pstl/glue_memory_defs.h \
   /usr/include/c++/13/pstl/pstl_config.h \
   /usr/include/c++/13/ratio \
@@ -371,11 +374,7 @@ CMakeFiles/proc_usage_firebird_plugin.dir/cpp/src/plugin_entry.cpp.o: /home/j8r/
 
 /usr/include/x86_64-linux-gnu/bits/types/sigset_t.h:
 
-/usr/include/c++/13/concepts:
-
-/usr/include/c++/13/memory:
-
-/usr/include/x86_64-linux-gnu/bits/floatn.h:
+/usr/include/x86_64-linux-gnu/bits/types/locale_t.h:
 
 /usr/include/c++/13/codecvt:
 
@@ -429,8 +428,6 @@ CMakeFiles/proc_usage_firebird_plugin.dir/cpp/src/plugin_entry.cpp.o: /home/j8r/
 
 /usr/include/x86_64-linux-gnu/bits/types/clockid_t.h:
 
-/usr/include/c++/13/bits/stl_raw_storage_iter.h:
-
 /usr/include/c++/13/filesystem:
 
 /usr/include/x86_64-linux-gnu/bits/types/struct_sched_param.h:
@@ -473,6 +470,8 @@ CMakeFiles/proc_usage_firebird_plugin.dir/cpp/src/plugin_entry.cpp.o: /home/j8r/
 
 /usr/include/c++/13/bits/locale_facets.tcc:
 
+/usr/include/c++/13/bits/ostream_insert.h:
+
 /usr/include/c++/13/bits/range_access.h:
 
 /usr/include/c++/13/compare:
@@ -490,8 +489,6 @@ CMakeFiles/proc_usage_firebird_plugin.dir/cpp/src/plugin_entry.cpp.o: /home/j8r/
 /usr/include/c++/13/bits/std_abs.h:
 
 /usr/include/c++/13/bits/parse_numbers.h:
-
-/usr/include/c++/13/bits/ostream_insert.h:
 
 /usr/include/c++/13/bits/ostream.tcc:
 
@@ -511,27 +508,9 @@ CMakeFiles/proc_usage_firebird_plugin.dir/cpp/src/plugin_entry.cpp.o: /home/j8r/
 
 /usr/include/c++/13/utility:
 
-/usr/include/c++/13/bits/fs_ops.h:
-
-/usr/include/c++/13/bits/refwrap.h:
-
-/usr/include/x86_64-linux-gnu/bits/types/__fpos_t.h:
-
-/usr/include/c++/13/bits/fstream.tcc:
-
-/usr/include/c++/13/bits/exception_ptr.h:
-
-/usr/include/x86_64-linux-gnu/c++/13/bits/ctype_inline.h:
-
-/usr/include/c++/13/bits/char_traits.h:
-
-/usr/include/c++/13/bits/hashtable_policy.h:
-
-/usr/lib/gcc/x86_64-linux-gnu/13/include/syslimits.h:
-
-/usr/include/x86_64-linux-gnu/bits/types/clock_t.h:
-
 /usr/include/c++/13/bits/chrono_io.h:
+
+/usr/include/c++/13/bits/ranges_algo.h:
 
 /usr/include/c++/13/bits/invoke.h:
 
@@ -539,23 +518,11 @@ CMakeFiles/proc_usage_firebird_plugin.dir/cpp/src/plugin_entry.cpp.o: /home/j8r/
 
 /usr/include/x86_64-linux-gnu/bits/environments.h:
 
-/usr/include/c++/13/optional:
-
-/usr/include/c++/13/bits/vector.tcc:
-
 /usr/include/c++/13/variant:
 
 /usr/include/x86_64-linux-gnu/bits/waitstatus.h:
 
 /usr/include/c++/13/bits/exception_defines.h:
-
-/usr/include/c++/13/bits/basic_string.tcc:
-
-/usr/include/c++/13/bits/allocated_ptr.h:
-
-/usr/include/c++/13/bit:
-
-/usr/include/alloca.h:
 
 /usr/include/c++/13/bits/atomic_lockfree_defines.h:
 
@@ -564,10 +531,6 @@ CMakeFiles/proc_usage_firebird_plugin.dir/cpp/src/plugin_entry.cpp.o: /home/j8r/
 /usr/include/c++/13/bits/basic_string.h:
 
 /usr/include/libintl.h:
-
-/usr/include/c++/13/bits/chrono.h:
-
-/usr/include/x86_64-linux-gnu/bits/endianness.h:
 
 /usr/include/c++/13/atomic:
 
@@ -625,6 +588,12 @@ CMakeFiles/proc_usage_firebird_plugin.dir/cpp/src/plugin_entry.cpp.o: /home/j8r/
 
 /usr/include/c++/13/cstdio:
 
+/usr/include/c++/13/bits/allocated_ptr.h:
+
+/usr/include/c++/13/bit:
+
+/usr/include/c++/13/bits/basic_string.tcc:
+
 /usr/include/c++/13/bits/stl_function.h:
 
 /usr/include/c++/13/bits/move.h:
@@ -657,9 +626,47 @@ CMakeFiles/proc_usage_firebird_plugin.dir/cpp/src/plugin_entry.cpp.o: /home/j8r/
 
 /usr/include/c++/13/backward/auto_ptr.h:
 
-/usr/include/c++/13/bits/istream.tcc:
+/usr/include/alloca.h:
+
+/usr/include/c++/13/bits/refwrap.h:
+
+/usr/include/x86_64-linux-gnu/bits/types/__fpos_t.h:
+
+/usr/include/c++/13/bits/fstream.tcc:
+
+/usr/include/c++/13/bits/stl_raw_storage_iter.h:
+
+/usr/include/c++/13/algorithm:
+
+/usr/include/c++/13/array:
+
+/usr/include/c++/13/bits/hash_bytes.h:
+
+/usr/include/x86_64-linux-gnu/bits/endianness.h:
+
+/usr/include/c++/13/bits/chrono.h:
+
+/usr/include/c++/13/bits/fs_ops.h:
+
+/usr/include/x86_64-linux-gnu/c++/13/bits/ctype_inline.h:
+
+/usr/include/c++/13/bits/char_traits.h:
+
+/usr/include/c++/13/bits/hashtable_policy.h:
+
+/usr/lib/gcc/x86_64-linux-gnu/13/include/syslimits.h:
+
+/usr/include/x86_64-linux-gnu/bits/types/clock_t.h:
+
+/usr/include/c++/13/bits/exception_ptr.h:
+
+/usr/include/c++/13/bits/vector.tcc:
+
+/usr/include/c++/13/optional:
 
 /home/j8r/code/firebird_counter/cpp/include/proc_usage/firebird_bridge.hpp:
+
+/usr/include/c++/13/bits/istream.tcc:
 
 /usr/include/c++/13/bits/locale_conv.h:
 
@@ -697,6 +704,10 @@ CMakeFiles/proc_usage_firebird_plugin.dir/cpp/src/plugin_entry.cpp.o: /home/j8r/
 
 /usr/include/c++/13/bits/fs_dir.h:
 
+/usr/include/x86_64-linux-gnu/bits/types/cookie_io_functions_t.h:
+
+/usr/include/c++/13/sstream:
+
 /usr/include/x86_64-linux-gnu/bits/types/error_t.h:
 
 /usr/include/c++/13/bits/hashtable.h:
@@ -705,10 +716,6 @@ CMakeFiles/proc_usage_firebird_plugin.dir/cpp/src/plugin_entry.cpp.o: /home/j8r/
 
 /usr/include/errno.h:
 
-/usr/include/c++/13/array:
-
-/usr/include/c++/13/bits/hash_bytes.h:
-
 /home/j8r/code/firebird_counter/cpp/include/proc_usage/spool_writer.hpp:
 
 /usr/include/c++/13/bits/ios_base.h:
@@ -716,6 +723,12 @@ CMakeFiles/proc_usage_firebird_plugin.dir/cpp/src/plugin_entry.cpp.o: /home/j8r/
 /usr/include/c++/13/bits/uniform_int_dist.h:
 
 /usr/include/c++/13/bits/locale_classes.tcc:
+
+/usr/include/c++/13/concepts:
+
+/usr/include/c++/13/memory:
+
+/usr/include/x86_64-linux-gnu/bits/floatn.h:
 
 /usr/include/c++/13/cstdint:
 
@@ -748,6 +761,8 @@ CMakeFiles/proc_usage_firebird_plugin.dir/cpp/src/plugin_entry.cpp.o: /home/j8r/
 /usr/include/inttypes.h:
 
 /usr/include/c++/13/ext/concurrence.h:
+
+/usr/include/c++/13/pstl/glue_algorithm_defs.h:
 
 /usr/include/x86_64-linux-gnu/bits/types/struct_timeval.h:
 
@@ -871,10 +886,6 @@ CMakeFiles/proc_usage_firebird_plugin.dir/cpp/src/plugin_entry.cpp.o: /home/j8r/
 
 /usr/include/x86_64-linux-gnu/bits/local_lim.h:
 
-/usr/include/c++/13/sstream:
-
-/usr/include/x86_64-linux-gnu/bits/types/cookie_io_functions_t.h:
-
 /usr/include/x86_64-linux-gnu/bits/locale.h:
 
 /usr/include/c++/13/climits:
@@ -918,5 +929,3 @@ CMakeFiles/proc_usage_firebird_plugin.dir/cpp/src/plugin_entry.cpp.o: /home/j8r/
 /usr/include/c++/13/bits/charconv.h:
 
 /usr/include/x86_64-linux-gnu/bits/types/__sigset_t.h:
-
-/usr/include/x86_64-linux-gnu/bits/types/locale_t.h:

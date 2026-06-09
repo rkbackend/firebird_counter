@@ -17,6 +17,8 @@ std::string usage_kind_to_string(UsageKind kind)
         return "procedure";
     case UsageKind::sql:
         return "sql";
+    case UsageKind::sql_text:
+        return "sql_text";
     }
 
     return "unknown";

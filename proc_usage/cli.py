@@ -45,16 +45,16 @@ def _build_parser() -> argparse.ArgumentParser:
     serve = subparsers.add_parser("serve", parents=[config_parent], help="Run the long-lived ingestion service")
     serve.set_defaults(handler=handle_serve)
 
-    top = subparsers.add_parser("top", parents=[config_parent], help="Show the busiest procedures or SQL kinds")
+    top = subparsers.add_parser("top", parents=[config_parent], help="Show the busiest procedures, SQL kinds or full SQL texts")
     top.add_argument("--limit", type=int, default=10)
-    top.add_argument("--kind", choices=["procedure", "sql"], default="procedure")
+    top.add_argument("--kind", choices=["procedure", "sql", "sql-text"], default="procedure")
     top.add_argument("--hour", help="Optional UTC hour filter in YYYY-MM-DDTHH:00Z format")
     top.set_defaults(handler=handle_top)
 
-    show = subparsers.add_parser("show", parents=[config_parent], help="Show stats for one procedure or SQL kind")
-    show.add_argument("name", help="Procedure name or SQL kind to inspect")
+    show = subparsers.add_parser("show", parents=[config_parent], help="Show stats for one procedure, SQL kind or SQL fingerprint")
+    show.add_argument("name", help="Procedure name, SQL kind or SQL fingerprint to inspect")
     show.add_argument("--database", help="Optional database filter")
-    show.add_argument("--kind", choices=["procedure", "sql"], default="procedure")
+    show.add_argument("--kind", choices=["procedure", "sql", "sql-text"], default="procedure")
     show.add_argument("--hour", help="Optional UTC hour filter in YYYY-MM-DDTHH:00Z format")
     show.set_defaults(handler=handle_show)
 
@@ -137,6 +137,13 @@ def handle_show(args: argparse.Namespace) -> int:
         print("No statistics found.")
         return 0
 
+    if args.kind == "sql-text":
+        sql_text = storage.sql_text_by_fingerprint(args.name)
+        if sql_text is not None:
+            print("SQL text:")
+            print(sql_text)
+            print()
+
     for row in rows:
         print(_format_row(row))
 
@@ -168,7 +175,7 @@ def _format_row(row: object) -> str:
     """Форматирует строку статистики для консольного вывода."""
 
     avg_time_ms = float(row["avg_time_ms"])
-    return (
+    output = (
         f"{row['total_calls']:>10}  "
         f"{row['usage_hour']}  "
         f"{row['database']}  "
@@ -178,3 +185,9 @@ def _format_row(row: object) -> str:
         f"max={row['max_time_ms']}ms  "
         f"{row['last_seen_at']}"
     )
+    if "sql_text" in row.keys():
+        preview = str(row["sql_text"]).replace("\n", " ")
+        if len(preview) > 80:
+            preview = preview[:77] + "..."
+        output += f"  sql={preview}"
+    return output

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import tempfile
 import unittest
@@ -53,6 +54,17 @@ class ProcUsageServiceTests(unittest.TestCase):
                     "min_time_ms": 2,
                     "max_time_ms": 7,
                 },
+                {
+                    "ts": "2026-06-06T12:00:04.000Z",
+                    "kind": "sql_text",
+                    "hour": "2026-06-06T12:00Z",
+                    "db": "/db/main.fdb",
+                    "name": "SELECT * FROM BENCH_DATA WHERE ID = 42",
+                    "count": 2,
+                    "total_time_ms": 18,
+                    "min_time_ms": 8,
+                    "max_time_ms": 10,
+                },
             ]
             lines = "\n".join(json.dumps(item) for item in payloads) + "\n"
             (spool_dir / "batch_001.jsonl").write_text(lines, encoding="utf-8")
@@ -80,6 +92,15 @@ class ProcUsageServiceTests(unittest.TestCase):
             self.assertEqual(len(sql_rows), 1)
             self.assertEqual(sql_rows[0]["name"], "SELECT")
             self.assertEqual(sql_rows[0]["total_calls"], 5)
+
+            sql_text_rows = storage.top_usage(kind="sql-text", limit=10, usage_hour="2026-06-06T12:00Z")
+            self.assertEqual(len(sql_text_rows), 1)
+            self.assertEqual(
+                sql_text_rows[0]["name"],
+                hashlib.sha256("SELECT * FROM BENCH_DATA WHERE ID = 42".encode("utf-8")).hexdigest(),
+            )
+            self.assertEqual(sql_text_rows[0]["sql_text"], "SELECT * FROM BENCH_DATA WHERE ID = 42")
+            self.assertEqual(sql_text_rows[0]["total_calls"], 2)
 
             self.assertEqual(list(spool_dir.glob("*")), [])
 

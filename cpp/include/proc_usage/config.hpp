@@ -19,6 +19,8 @@ struct CollectorConfig {
     std::filesystem::path debug_log_path;
     // Если true, дополнительно собирать timing обычных SQL statement'ов.
     bool enable_sql_stats {false};
+    // Если true, дополнительно собирать timing по полному тексту SQL-запроса.
+    bool enable_sql_text_stats {false};
     // Если список не пуст, будут учитываться только базы, путь которых содержит
     // один из этих фрагментов.
     std::vector<std::string> include_databases;

@@ -5,6 +5,11 @@
 - `without_plugin` - Firebird работает без `ProcUsageTrace`
 - `with_plugin` - Firebird работает с включенным `ProcUsageTrace`
 
+Профиль плагина выбирается отдельно:
+
+- `aggregates` - обычные агрегаты по процедурам и `sql_kind`
+- `sql_text` - обычные агрегаты плюс полные SQL-тексты с новой фичей `enable_sql_text_stats`
+
 ## Что делает harness
 
 - создает отдельную benchmark-БД
@@ -15,6 +20,7 @@
 - в режиме `both` чередует порядок `without_plugin` / `with_plugin` между итерациями
 - делает по умолчанию `5` измерений на каждый режим
 - сохраняет JSON-отчет в `bench/results/latest.json`
+- в отчёте дополнительно показывает средний размер `spool` и итоговый размер `SQLite`
 
 ## Быстрый запуск
 
@@ -23,6 +29,7 @@
 ```bash
 python3 bench/run_benchmark.py \
   --mode both \
+  --plugin-profile aggregates \
   --user sysdba \
   --password 'YOUR_PASSWORD'
 ```
@@ -40,6 +47,21 @@ python3 bench/run_benchmark.py \
 ```bash
 python3 bench/run_benchmark.py \
   --mode both \
+  --plugin-profile aggregates \
+  --user sysdba \
+  --password 'YOUR_PASSWORD' \
+  --client-count 64 \
+  --procedure-count 1000 \
+  --target-runtime-sec 150 \
+  --iterations 5
+```
+
+Сравнение новой фичи с полными SQL-текстами:
+
+```bash
+python3 bench/run_benchmark.py \
+  --mode both \
+  --plugin-profile sql_text \
   --user sysdba \
   --password 'YOUR_PASSWORD' \
   --client-count 64 \
@@ -71,9 +93,36 @@ python3 bench/generate_sql.py \
 Дополнительная метрика:
 
 - время полного пути `SQL -> flush spool -> ingest-once -> SQLite`
+- размер `spool` после flush
+- размер итоговой `SQLite` после ingest
 
 Для режима `with_plugin` harness дополнительно проверяет:
 
 - что spool-файлы реально появились
 - что `ingest-once` отработал без ошибки
 - что суммарное число вызовов процедур в `SQLite` совпало с ожидаемым числом `EXECUTE PROCEDURE`
+- в профиле `sql_text` - что в `sql_text_catalog` и `sql_text_usage_stats` действительно появились строки
+
+## Как смотреть результаты
+
+В консоль выводятся:
+
+- `Avg SQL (s)` и `Min SQL (s)` - время самой Firebird-нагрузки
+- `Avg Ingest (s)` - среднее время `ingest-once`
+- `Avg Spool KB` - средний суммарный размер spool-файлов после flush
+- `Avg SQLite KB` - средний размер SQLite-файла после ingest
+- `Valid/Total` - сколько итераций прошло встроенные проверки
+
+Полный JSON-отчёт лежит в:
+
+- `bench/results/latest.json`
+- `bench/results/<timestamp>.json`
+
+В JSON есть полезные поля:
+
+- `plugin_profile`
+- `plugin_settings.enable_sql_text_stats`
+- `results.<mode>.iterations[].spool_size_bytes`
+- `results.<mode>.iterations[].sqlite_db_size_bytes`
+- `results.<mode>.iterations[].observed_sql_text_fingerprints`
+- `results.<mode>.iterations[].observed_sql_text_hour_rows`

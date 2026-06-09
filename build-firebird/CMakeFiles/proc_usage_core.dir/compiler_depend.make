@@ -7,6 +7,7 @@ CMakeFiles/proc_usage_core.dir/cpp/src/collector.cpp.o: /home/j8r/code/firebird_
   /usr/include/alloca.h \
   /usr/include/asm-generic/errno-base.h \
   /usr/include/asm-generic/errno.h \
+  /usr/include/c++/13/algorithm \
   /usr/include/c++/13/array \
   /usr/include/c++/13/backward/auto_ptr.h \
   /usr/include/c++/13/backward/binders.h \
@@ -73,6 +74,7 @@ CMakeFiles/proc_usage_core.dir/cpp/src/collector.cpp.o: /home/j8r/code/firebird_
   /usr/include/c++/13/bits/ptr_traits.h \
   /usr/include/c++/13/bits/quoted_string.h \
   /usr/include/c++/13/bits/range_access.h \
+  /usr/include/c++/13/bits/ranges_algo.h \
   /usr/include/c++/13/bits/ranges_algobase.h \
   /usr/include/c++/13/bits/ranges_base.h \
   /usr/include/c++/13/bits/ranges_cmp.h \
@@ -155,6 +157,7 @@ CMakeFiles/proc_usage_core.dir/cpp/src/collector.cpp.o: /home/j8r/code/firebird_
   /usr/include/c++/13/optional \
   /usr/include/c++/13/ostream \
   /usr/include/c++/13/pstl/execution_defs.h \
+  /usr/include/c++/13/pstl/glue_algorithm_defs.h \
   /usr/include/c++/13/pstl/glue_memory_defs.h \
   /usr/include/c++/13/pstl/pstl_config.h \
   /usr/include/c++/13/ratio \
@@ -1223,8 +1226,6 @@ CMakeFiles/proc_usage_core.dir/cpp/src/spool_writer.cpp.o: /home/j8r/code/firebi
 
 /usr/include/c++/13/bits/fstream.tcc:
 
-/usr/include/c++/13/algorithm:
-
 /usr/lib/gcc/x86_64-linux-gnu/13/include/stdint.h:
 
 /usr/include/c++/13/numeric:
@@ -1279,9 +1280,7 @@ CMakeFiles/proc_usage_core.dir/cpp/src/spool_writer.cpp.o: /home/j8r/code/firebi
 
 /usr/include/x86_64-linux-gnu/bits/types/timer_t.h:
 
-/usr/include/c++/13/ctime:
-
-/usr/include/c++/13/codecvt:
+/usr/include/x86_64-linux-gnu/bits/types/time_t.h:
 
 /usr/include/c++/13/cstdio:
 
@@ -1299,6 +1298,10 @@ CMakeFiles/proc_usage_core.dir/cpp/src/spool_writer.cpp.o: /home/j8r/code/firebi
 
 /usr/include/x86_64-linux-gnu/bits/types/struct_itimerspec.h:
 
+/usr/include/c++/13/codecvt:
+
+/usr/include/c++/13/ctime:
+
 /usr/include/x86_64-linux-gnu/sys/syscall.h:
 
 /usr/include/c++/13/clocale:
@@ -1307,11 +1310,11 @@ CMakeFiles/proc_usage_core.dir/cpp/src/spool_writer.cpp.o: /home/j8r/code/firebi
 
 /usr/include/c++/13/cstdlib:
 
-/usr/include/c++/13/pstl/glue_algorithm_defs.h:
-
-/home/j8r/code/firebird_counter/cpp/src/collector.cpp:
-
 /usr/include/c++/13/cctype:
+
+/usr/include/x86_64-linux-gnu/bits/types/struct_tm.h:
+
+/usr/include/c++/13/ext/atomicity.h:
 
 /usr/include/c++/13/pstl/glue_numeric_defs.h:
 
@@ -1348,8 +1351,6 @@ CMakeFiles/proc_usage_core.dir/cpp/src/spool_writer.cpp.o: /home/j8r/code/firebi
 /usr/include/x86_64-linux-gnu/bits/mathcalls.h:
 
 /usr/include/c++/13/bits/stl_relops.h:
-
-/usr/include/c++/13/bits/stl_raw_storage_iter.h:
 
 /usr/include/c++/13/filesystem:
 
@@ -1401,6 +1402,8 @@ CMakeFiles/proc_usage_core.dir/cpp/src/spool_writer.cpp.o: /home/j8r/code/firebi
 
 /usr/include/c++/13/bits/ranges_base.h:
 
+/usr/include/c++/13/bits/ostream_insert.h:
+
 /usr/include/c++/13/tr1/hypergeometric.tcc:
 
 /home/j8r/code/firebird_counter/cpp/src/spool_writer.cpp:
@@ -1423,8 +1426,6 @@ CMakeFiles/proc_usage_core.dir/cpp/src/spool_writer.cpp.o: /home/j8r/code/firebi
 
 /usr/include/c++/13/bits/parse_numbers.h:
 
-/usr/include/c++/13/bits/ostream_insert.h:
-
 /usr/include/c++/13/bits/ostream.tcc:
 
 /usr/include/c++/13/numbers:
@@ -1433,35 +1434,27 @@ CMakeFiles/proc_usage_core.dir/cpp/src/spool_writer.cpp.o: /home/j8r/code/firebi
 
 /usr/include/c++/13/bits/fs_fwd.h:
 
-/usr/include/x86_64-linux-gnu/bits/flt-eval-method.h:
-
-/usr/include/c++/13/bits/streambuf_iterator.h:
-
-/usr/include/x86_64-linux-gnu/c++/13/bits/opt_random.h:
-
-/usr/include/c++/13/ostream:
-
-/usr/include/c++/13/bits/cpp_type_traits.h:
-
-/usr/include/x86_64-linux-gnu/bits/types.h:
-
 /usr/include/c++/13/bits/chrono_io.h:
 
 /usr/include/c++/13/bits/basic_string.h:
 
 /usr/include/libintl.h:
 
+/usr/include/c++/13/bits/ranges_algo.h:
+
+/usr/include/c++/13/bits/invoke.h:
+
+/home/j8r/code/firebird_counter/cpp/src/config.cpp:
+
+/usr/lib/gcc/x86_64-linux-gnu/13/include/stddef.h:
+
+/usr/include/x86_64-linux-gnu/bits/environments.h:
+
 /usr/include/x86_64-linux-gnu/bits/endianness.h:
 
 /usr/include/c++/13/bits/chrono.h:
 
 /usr/include/c++/13/bits/fs_ops.h:
-
-/home/j8r/code/firebird_counter/cpp/include/proc_usage/firebird_bridge.hpp:
-
-/usr/include/c++/13/bits/locale_conv.h:
-
-/usr/include/c++/13/bits/istream.tcc:
 
 /usr/include/c++/13/bits/exception_ptr.h:
 
@@ -1484,14 +1477,6 @@ CMakeFiles/proc_usage_core.dir/cpp/src/spool_writer.cpp.o: /home/j8r/code/firebi
 /usr/include/x86_64-linux-gnu/bits/waitstatus.h:
 
 /usr/include/c++/13/bits/exception_defines.h:
-
-/usr/include/c++/13/bits/basic_string.tcc:
-
-/usr/include/c++/13/bits/allocated_ptr.h:
-
-/usr/include/c++/13/bit:
-
-/usr/include/alloca.h:
 
 /usr/include/c++/13/bits/atomic_lockfree_defines.h:
 
@@ -1517,6 +1502,12 @@ CMakeFiles/proc_usage_core.dir/cpp/src/spool_writer.cpp.o: /home/j8r/code/firebi
 
 /usr/include/c++/13/mutex:
 
+/usr/include/c++/13/bits/allocated_ptr.h:
+
+/usr/include/c++/13/bit:
+
+/usr/include/c++/13/bits/basic_string.tcc:
+
 /usr/include/c++/13/backward/auto_ptr.h:
 
 /usr/include/c++/13/bits/basic_ios.tcc:
@@ -1528,10 +1519,6 @@ CMakeFiles/proc_usage_core.dir/cpp/src/spool_writer.cpp.o: /home/j8r/code/firebi
 /usr/include/c++/13/bits/move.h:
 
 /home/j8r/code/firebird_counter/cpp/include/proc_usage/collector.hpp:
-
-/usr/include/x86_64-linux-gnu/bits/stdint-intn.h:
-
-/usr/include/c++/13/string:
 
 /usr/include/c++/13/bits/cxxabi_forced.h:
 
@@ -1549,21 +1536,9 @@ CMakeFiles/proc_usage_core.dir/cpp/src/spool_writer.cpp.o: /home/j8r/code/firebi
 
 /usr/include/c++/13/iosfwd:
 
-/usr/include/x86_64-linux-gnu/sys/select.h:
-
-/usr/include/c++/13/cwchar:
-
-/usr/include/c++/13/bits/concept_check.h:
-
 /usr/include/c++/13/bits/alloc_traits.h:
 
-/usr/include/c++/13/bits/stringfwd.h:
-
-/usr/include/c++/13/bits/iterator_concepts.h:
-
-/usr/include/c++/13/bits/basic_ios.h:
-
-/usr/include/x86_64-linux-gnu/bits/time64.h:
+/usr/include/c++/13/bits/concept_check.h:
 
 /usr/include/x86_64-linux-gnu/bits/long-double.h:
 
@@ -1587,6 +1562,50 @@ CMakeFiles/proc_usage_core.dir/cpp/src/spool_writer.cpp.o: /home/j8r/code/firebi
 
 /usr/include/c++/13/span:
 
+/home/j8r/code/firebird_counter/cpp/include/proc_usage/firebird_bridge.hpp:
+
+/usr/include/c++/13/bits/istream.tcc:
+
+/usr/include/c++/13/bits/locale_conv.h:
+
+/usr/include/alloca.h:
+
+/usr/include/c++/13/bits/stl_raw_storage_iter.h:
+
+/usr/include/c++/13/algorithm:
+
+/usr/include/c++/13/array:
+
+/usr/include/c++/13/bits/hash_bytes.h:
+
+/usr/include/c++/13/bits/stringfwd.h:
+
+/usr/include/c++/13/bits/iterator_concepts.h:
+
+/usr/include/wchar.h:
+
+/usr/include/c++/13/bits/shared_ptr_base.h:
+
+/usr/include/c++/13/bits/basic_ios.h:
+
+/usr/include/x86_64-linux-gnu/bits/time64.h:
+
+/usr/include/x86_64-linux-gnu/bits/flt-eval-method.h:
+
+/usr/include/c++/13/bits/streambuf_iterator.h:
+
+/usr/include/x86_64-linux-gnu/c++/13/bits/opt_random.h:
+
+/usr/include/c++/13/ostream:
+
+/usr/include/c++/13/bits/cpp_type_traits.h:
+
+/usr/include/c++/13/string:
+
+/usr/include/x86_64-linux-gnu/bits/stdint-intn.h:
+
+/usr/include/x86_64-linux-gnu/bits/types.h:
+
 /usr/include/c++/13/bits/localefwd.h:
 
 /usr/include/c++/13/bits/cxxabi_init_exception.h:
@@ -1597,6 +1616,10 @@ CMakeFiles/proc_usage_core.dir/cpp/src/spool_writer.cpp.o: /home/j8r/code/firebi
 
 /usr/include/c++/13/bits/exception.h:
 
+/usr/include/c++/13/bits/memory_resource.h:
+
+/usr/include/c++/13/streambuf:
+
 /usr/include/x86_64-linux-gnu/bits/stdlib-float.h:
 
 /usr/include/x86_64-linux-gnu/bits/types/error_t.h:
@@ -1606,10 +1629,6 @@ CMakeFiles/proc_usage_core.dir/cpp/src/spool_writer.cpp.o: /home/j8r/code/firebi
 /usr/include/c++/13/bits/functional_hash.h:
 
 /usr/include/errno.h:
-
-/usr/include/c++/13/array:
-
-/usr/include/c++/13/bits/hash_bytes.h:
 
 /home/j8r/code/firebird_counter/cpp/include/proc_usage/spool_writer.hpp:
 
@@ -1631,23 +1650,9 @@ CMakeFiles/proc_usage_core.dir/cpp/src/spool_writer.cpp.o: /home/j8r/code/firebi
 
 /usr/include/c++/13/utility:
 
-/usr/include/c++/13/bits/ranges_algo.h:
+/usr/include/x86_64-linux-gnu/sys/select.h:
 
-/usr/include/c++/13/bits/invoke.h:
-
-/home/j8r/code/firebird_counter/cpp/src/config.cpp:
-
-/usr/lib/gcc/x86_64-linux-gnu/13/include/stddef.h:
-
-/usr/include/x86_64-linux-gnu/bits/environments.h:
-
-/usr/include/c++/13/streambuf:
-
-/usr/include/c++/13/bits/memory_resource.h:
-
-/usr/include/c++/13/bits/shared_ptr_base.h:
-
-/usr/include/wchar.h:
+/usr/include/c++/13/cwchar:
 
 /usr/include/c++/13/debug/assertions.h:
 
@@ -1669,9 +1674,13 @@ CMakeFiles/proc_usage_core.dir/cpp/src/spool_writer.cpp.o: /home/j8r/code/firebi
 
 /usr/include/c++/13/ext/concurrence.h:
 
-/usr/include/c++/13/bits/stl_iterator.h:
+/home/j8r/code/firebird_counter/cpp/src/collector.cpp:
+
+/usr/include/c++/13/pstl/glue_algorithm_defs.h:
 
 /usr/include/x86_64-linux-gnu/bits/types/struct_timeval.h:
+
+/usr/include/c++/13/bits/stl_iterator.h:
 
 /usr/include/c++/13/ext/numeric_traits.h:
 
@@ -1848,9 +1857,3 @@ CMakeFiles/proc_usage_core.dir/cpp/src/spool_writer.cpp.o: /home/j8r/code/firebi
 /usr/include/x86_64-linux-gnu/bits/types/__sigset_t.h:
 
 /usr/include/x86_64-linux-gnu/bits/types/locale_t.h:
-
-/usr/include/c++/13/ext/atomicity.h:
-
-/usr/include/x86_64-linux-gnu/bits/types/struct_tm.h:
-
-/usr/include/x86_64-linux-gnu/bits/types/time_t.h:
