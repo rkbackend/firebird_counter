@@ -304,7 +304,7 @@ python3 bench/run_benchmark.py \
   --client-count 64 \
   --procedure-count 1000 \
   --target-runtime-sec 20 \
-  --iterations 3 \
+  --iterations 5 \
   --sudo-command 'sudo -S'
 ```
 
@@ -314,7 +314,8 @@ python3 bench/run_benchmark.py \
 - генерирует `1000` процедур `BENCH_PROC_0001 .. BENCH_PROC_1000`
 - запускает `64` параллельных клиента `isql-fb`
 - смешивает `EXECUTE PROCEDURE`, `SELECT`, `UPDATE`, `INSERT` и `DELETE`
-- прогоняет нагрузку сначала без `ProcUsageTrace`, затем с `ProcUsageTrace`
+- в режиме `both` чередует порядок `without_plugin` и `with_plugin` между итерациями
+- по умолчанию делает `5` итераций на каждый режим; практический диапазон для честного сравнения — `3-5`
 - сохраняет JSON-отчет в `bench/results/` или, если каталог недоступен на запись, в `workspace/results/`
 
 В этой установке Firebird локальный benchmark использует TCP-подключение вида:

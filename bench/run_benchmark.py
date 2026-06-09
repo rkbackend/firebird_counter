@@ -162,6 +162,7 @@ class FirebirdBenchmarkRunner:
         self.benchmark_db_file = Path("/tmp") / f"firebird_benchmark_{self.run_id}.fdb"
         self.connection_database = f"{self.host}/{self.port}:{self.benchmark_db_file}"
         self.original_firebird_conf = self.firebird_conf_path.read_text(encoding="utf-8")
+        self.active_plugin_state: Optional[bool] = None
 
     def preflight(self) -> None:
         if shutil.which("isql-fb") is None:
@@ -185,6 +186,7 @@ class FirebirdBenchmarkRunner:
         calibration_rounds = self.args.calibration_rounds
         benchmark_rounds = calibration_rounds
         results: dict[str, ModeResult] = {}
+        execution_plan = self._build_execution_plan()
 
         try:
             self._ensure_mode(enable_plugin=False)
@@ -195,10 +197,36 @@ class FirebirdBenchmarkRunner:
             )
             benchmark_rounds = self._estimate_rounds(calibration_runtime)
 
-            modes = [self.args.mode] if self.args.mode != "both" else ["without_plugin", "with_plugin"]
-            for mode in modes:
-                enable_plugin = mode == "with_plugin"
-                results[mode] = self._run_mode(mode=mode, enable_plugin=enable_plugin, rounds_per_client=benchmark_rounds)
+            if self.args.mode == "both":
+                artifacts = self._write_artifacts(rounds_per_client=benchmark_rounds)
+                iteration_results = {mode: [] for mode in self._target_modes()}
+                for plan_item in execution_plan:
+                    iteration = int(plan_item["iteration"])
+                    for mode in plan_item["modes"]:
+                        iteration_results[mode].append(
+                            self._run_iteration(
+                                mode=mode,
+                                enable_plugin=(mode == "with_plugin"),
+                                artifacts=artifacts,
+                                iteration=iteration,
+                            )
+                        )
+
+                results = {
+                    mode: self._summarize_mode_result(
+                        mode=mode,
+                        rounds_per_client=benchmark_rounds,
+                        iterations=iteration_results[mode],
+                    )
+                    for mode in self._target_modes()
+                }
+            else:
+                mode = self.args.mode
+                results[mode] = self._run_mode(
+                    mode=mode,
+                    enable_plugin=(mode == "with_plugin"),
+                    rounds_per_client=benchmark_rounds,
+                )
         finally:
             self._restore_firebird_conf()
 
@@ -207,6 +235,7 @@ class FirebirdBenchmarkRunner:
             calibration_runtime=calibration_runtime,
             benchmark_rounds=benchmark_rounds,
             results=results,
+            execution_plan=execution_plan,
         )
         timestamp = started_at.strftime("%Y%m%dT%H%M%SZ")
         report_paths = self._write_report_files(timestamp=timestamp, report=latest)
@@ -220,57 +249,105 @@ class FirebirdBenchmarkRunner:
         scaled = math.ceil((self.args.target_runtime_sec / calibration_runtime) * self.args.calibration_rounds * 0.9)
         return max(self.args.min_rounds_per_client, scaled)
 
+    def _target_modes(self) -> list[str]:
+        if self.args.mode == "both":
+            return ["without_plugin", "with_plugin"]
+        return [self.args.mode]
+
+    def _iteration_mode_order(self, iteration: int) -> list[str]:
+        modes = self._target_modes()
+        if self.args.mode != "both":
+            return modes
+        return modes if iteration % 2 == 1 else list(reversed(modes))
+
+    def _build_execution_plan(self) -> list[dict[str, object]]:
+        return [
+            {
+                "iteration": iteration,
+                "modes": self._iteration_mode_order(iteration),
+            }
+            for iteration in range(1, self.args.iterations + 1)
+        ]
+
     def _run_mode(self, mode: str, enable_plugin: bool, rounds_per_client: int) -> ModeResult:
-        self._ensure_mode(enable_plugin=enable_plugin)
         artifacts = self._write_artifacts(rounds_per_client=rounds_per_client)
         iterations: list[IterationResult] = []
 
         for iteration in range(1, self.args.iterations + 1):
-            self._prepare_iteration(artifacts=artifacts)
-            self._run_warmup(artifacts=artifacts)
-            self._prepare_iteration(artifacts=artifacts)
-
-            sql_runtime_sec = self._run_client_scripts(artifacts=artifacts, label=f"{mode}-iter-{iteration}")
-            ingest_runtime_sec: Optional[float] = None
-            spool_file_count = self._count_spool_files()
-            observed_calls: Optional[int] = None
-            distinct_procs: Optional[int] = None
-            valid = True
-            note = "ok"
-
-            if enable_plugin:
-                time.sleep(self.plugin_settings.flush_interval_sec * 2)
-                spool_file_count = self._count_spool_files()
-                ingest_runtime_sec = self._run_ingest_once()
-                observed_calls, distinct_procs = self._read_observed_call_stats()
-                if observed_calls != artifacts.expected_execute_procedure_calls:
-                    valid = False
-                    note = (
-                        "mismatch between expected and observed execute procedure calls: "
-                        f"{artifacts.expected_execute_procedure_calls} != {observed_calls}"
-                    )
-                elif spool_file_count <= 0:
-                    valid = False
-                    note = "plugin mode finished without spool files"
-            else:
-                if spool_file_count != 0:
-                    valid = False
-                    note = "baseline mode produced spool files"
-
             iterations.append(
-                IterationResult(
+                self._run_iteration(
+                    mode=mode,
+                    enable_plugin=enable_plugin,
+                    artifacts=artifacts,
                     iteration=iteration,
-                    sql_runtime_sec=sql_runtime_sec,
-                    ingest_runtime_sec=ingest_runtime_sec,
-                    spool_file_count=spool_file_count,
-                    expected_execute_procedure_calls=artifacts.expected_execute_procedure_calls,
-                    observed_execute_procedure_calls=observed_calls,
-                    distinct_procedures_observed=distinct_procs,
-                    valid=valid,
-                    note=note,
                 )
             )
 
+        return self._summarize_mode_result(
+            mode=mode,
+            rounds_per_client=rounds_per_client,
+            iterations=iterations,
+        )
+
+    def _run_iteration(
+        self,
+        *,
+        mode: str,
+        enable_plugin: bool,
+        artifacts: GeneratedBenchmark,
+        iteration: int,
+    ) -> IterationResult:
+        self._ensure_mode(enable_plugin=enable_plugin)
+        self._prepare_iteration(artifacts=artifacts)
+        self._run_warmup(artifacts=artifacts)
+        self._prepare_iteration(artifacts=artifacts)
+
+        sql_runtime_sec = self._run_client_scripts(artifacts=artifacts, label=f"{mode}-iter-{iteration}")
+        ingest_runtime_sec: Optional[float] = None
+        spool_file_count = self._count_spool_files()
+        observed_calls: Optional[int] = None
+        distinct_procs: Optional[int] = None
+        valid = True
+        note = "ok"
+
+        if enable_plugin:
+            time.sleep(self.plugin_settings.flush_interval_sec * 2)
+            spool_file_count = self._count_spool_files()
+            ingest_runtime_sec = self._run_ingest_once()
+            observed_calls, distinct_procs = self._read_observed_call_stats()
+            if observed_calls != artifacts.expected_execute_procedure_calls:
+                valid = False
+                note = (
+                    "mismatch between expected and observed execute procedure calls: "
+                    f"{artifacts.expected_execute_procedure_calls} != {observed_calls}"
+                )
+            elif spool_file_count <= 0:
+                valid = False
+                note = "plugin mode finished without spool files"
+        else:
+            if spool_file_count != 0:
+                valid = False
+                note = "baseline mode produced spool files"
+
+        return IterationResult(
+            iteration=iteration,
+            sql_runtime_sec=sql_runtime_sec,
+            ingest_runtime_sec=ingest_runtime_sec,
+            spool_file_count=spool_file_count,
+            expected_execute_procedure_calls=artifacts.expected_execute_procedure_calls,
+            observed_execute_procedure_calls=observed_calls,
+            distinct_procedures_observed=distinct_procs,
+            valid=valid,
+            note=note,
+        )
+
+    def _summarize_mode_result(
+        self,
+        *,
+        mode: str,
+        rounds_per_client: int,
+        iterations: list[IterationResult],
+    ) -> ModeResult:
         sql_values = [item.sql_runtime_sec for item in iterations]
         ingest_values = [item.ingest_runtime_sec for item in iterations if item.ingest_runtime_sec is not None]
         return ModeResult(
@@ -446,6 +523,9 @@ class FirebirdBenchmarkRunner:
             self._safe_unlink(path)
 
     def _ensure_mode(self, enable_plugin: bool) -> None:
+        if self.active_plugin_state is enable_plugin:
+            return
+
         rendered = render_firebird_conf(
             base_content=self.original_firebird_conf,
             enable_plugin=enable_plugin,
@@ -457,6 +537,7 @@ class FirebirdBenchmarkRunner:
             candidate.write_text(rendered, encoding="utf-8")
             self._copy_with_privileges(candidate, self.firebird_conf_path)
         self._restart_firebird_service()
+        self.active_plugin_state = enable_plugin
 
     def _restore_firebird_conf(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -464,6 +545,7 @@ class FirebirdBenchmarkRunner:
             candidate.write_text(self.original_firebird_conf, encoding="utf-8")
             self._copy_with_privileges(candidate, self.firebird_conf_path)
         self._restart_firebird_service()
+        self.active_plugin_state = None
 
     def _copy_with_privileges(self, source: Path, destination: Path) -> None:
         command = [*self.sudo_prefix, "install", "-m", "0644", str(source), str(destination)]
@@ -501,6 +583,7 @@ class FirebirdBenchmarkRunner:
         calibration_runtime: float,
         benchmark_rounds: int,
         results: dict[str, ModeResult],
+        execution_plan: list[dict[str, object]],
     ) -> dict[str, object]:
         without_plugin = results.get("without_plugin")
         with_plugin = results.get("with_plugin")
@@ -532,6 +615,7 @@ class FirebirdBenchmarkRunner:
             "calibration_rounds": self.args.calibration_rounds,
             "calibration_runtime_sec": calibration_runtime,
             "benchmark_rounds_per_client": benchmark_rounds,
+            "execution_plan": execution_plan,
             "client_count": self.args.client_count,
             "procedure_count": self.args.procedure_count,
             "iterations": self.args.iterations,
@@ -593,7 +677,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--target-runtime-sec", type=int, default=150)
     parser.add_argument("--calibration-rounds", type=int, default=20)
     parser.add_argument("--min-rounds-per-client", type=int, default=20)
-    parser.add_argument("--iterations", type=int, default=3)
+    parser.add_argument("--iterations", type=int, default=5)
     parser.add_argument("--user", default=os.environ.get("ISC_USER"))
     parser.add_argument("--password", default=os.environ.get("ISC_PASSWORD"))
     parser.add_argument("--service-name", default=DEFAULT_SERVICE_NAME)

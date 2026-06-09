@@ -12,6 +12,7 @@ from bench.run_benchmark import (
     FirebirdBenchmarkRunner,
     IterationResult,
     ModeResult,
+    _build_parser,
     parse_plugin_settings,
     render_firebird_conf,
 )
@@ -168,6 +169,31 @@ class BenchmarkRunnerTests(unittest.TestCase):
             self.assertEqual(total_calls, 21)
             self.assertEqual(distinct_procedures, 2)
 
+    def test_build_execution_plan_alternates_modes_in_both_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            runner = self._make_runner(Path(tmp_dir))
+
+            self.assertEqual(
+                runner._build_execution_plan(),
+                [
+                    {"iteration": 1, "modes": ["without_plugin", "with_plugin"]},
+                    {"iteration": 2, "modes": ["with_plugin", "without_plugin"]},
+                ],
+            )
+
+    def test_build_execution_plan_keeps_single_mode_order(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            runner = self._make_runner(Path(tmp_dir))
+            runner.args.mode = "with_plugin"
+
+            self.assertEqual(
+                runner._build_execution_plan(),
+                [
+                    {"iteration": 1, "modes": ["with_plugin"]},
+                    {"iteration": 2, "modes": ["with_plugin"]},
+                ],
+            )
+
     def test_build_report_adds_comparison_for_both_modes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             runner = self._make_runner(Path(tmp_dir))
@@ -219,6 +245,10 @@ class BenchmarkRunnerTests(unittest.TestCase):
                 started_at=datetime(2026, 6, 9, 12, 0, tzinfo=timezone.utc),
                 calibration_runtime=2.5,
                 benchmark_rounds=40,
+                execution_plan=[
+                    {"iteration": 1, "modes": ["without_plugin", "with_plugin"]},
+                    {"iteration": 2, "modes": ["with_plugin", "without_plugin"]},
+                ],
                 results={
                     "without_plugin": without_plugin,
                     "with_plugin": with_plugin,
@@ -226,6 +256,13 @@ class BenchmarkRunnerTests(unittest.TestCase):
             )
 
             self.assertEqual(report["benchmark_rounds_per_client"], 40)
+            self.assertEqual(
+                report["execution_plan"],
+                [
+                    {"iteration": 1, "modes": ["without_plugin", "with_plugin"]},
+                    {"iteration": 2, "modes": ["with_plugin", "without_plugin"]},
+                ],
+            )
             self.assertEqual(report["client_count"], 2)
             self.assertEqual(report["procedure_count"], 10)
             self.assertEqual(report["comparison"]["sql_delta_sec"], 1.5)
@@ -233,6 +270,12 @@ class BenchmarkRunnerTests(unittest.TestCase):
             self.assertEqual(report["comparison"]["ingest_delta_sec"], 0.7)
             self.assertIsNone(report["comparison"]["ingest_delta_pct"])
             self.assertEqual(report["plugin_settings"]["flush_interval_sec"], 2)
+
+    def test_parser_uses_five_iterations_by_default(self) -> None:
+        parser = _build_parser()
+        args = parser.parse_args(["--user", "sysdba", "--password", "masterkey"])
+
+        self.assertEqual(args.iterations, 5)
 
 
 if __name__ == "__main__":
