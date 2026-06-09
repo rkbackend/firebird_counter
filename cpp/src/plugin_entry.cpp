@@ -236,6 +236,25 @@ bool parse_bool_value(std::string_view raw_value)
     throw std::runtime_error("Invalid boolean value: " + std::string(raw_value));
 }
 
+SqlTextLoggingMode parse_sql_text_logging_mode(std::string_view raw_value)
+{
+    // Режимы именуются явно, чтобы в конфиге было понятно, зачем включён порог.
+    std::string value = trim_copy(raw_value);
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+
+    if (value == "all") {
+        return SqlTextLoggingMode::all;
+    }
+
+    if (value == "threshold") {
+        return SqlTextLoggingMode::threshold;
+    }
+
+    throw std::runtime_error("Invalid sql_text_logging_mode: " + std::string(raw_value));
+}
+
 std::optional<std::string> getenv_non_empty(const char* name)
 {
     // В разных окружениях развёртывания настройки плагина может быть удобно
@@ -326,6 +345,14 @@ CollectorConfig load_collector_config_from_plugin(
         config.enable_sql_text_stats = parse_bool_value(enable_sql_text_stats);
     }
 
+    if (const std::string sql_text_logging_mode = get_entry_value(raw_config.get(), status, "sql_text_logging_mode"); !sql_text_logging_mode.empty()) {
+        config.sql_text_logging_mode = parse_sql_text_logging_mode(sql_text_logging_mode);
+    }
+
+    if (const std::string sql_text_min_duration_ms = get_entry_value(raw_config.get(), status, "sql_text_min_duration_ms"); !sql_text_min_duration_ms.empty()) {
+        config.sql_text_min_duration_ms = static_cast<std::uint64_t>(std::stoull(sql_text_min_duration_ms));
+    }
+
     if (const std::string include = get_entry_value(raw_config.get(), status, "include_databases"); !include.empty()) {
         config.include_databases = split_filter_list(include);
     }
@@ -408,6 +435,8 @@ public:
     explicit ProcUsageTracePlugin(CollectorConfig config)
         : enable_sql_stats_(config.enable_sql_stats),
           enable_sql_text_stats_(config.enable_sql_text_stats),
+          sql_text_logging_mode_(config.sql_text_logging_mode),
+          sql_text_min_duration_ms_(config.sql_text_min_duration_ms),
           debug_log_(std::make_shared<DebugLog>(config.debug_log_path)),
           spool_dir_(config.spool_dir),
           writer_(std::make_shared<JsonlSpoolWriter>(spool_dir_)),
@@ -573,7 +602,7 @@ public:
                 sql_text == nullptr ? std::string_view() : std::string_view(sql_text),
                 duration_ms,
                 enable_sql_stats_,
-                enable_sql_text_stats_
+                should_collect_sql_text(duration_ms)
             );
             debug_log_->write(
                 "trace_dsql_execute finish db=" +
@@ -649,6 +678,19 @@ public:
     }
 
 private:
+    bool should_collect_sql_text(std::uint64_t duration_ms) const
+    {
+        if (!enable_sql_text_stats_) {
+            return false;
+        }
+
+        if (sql_text_logging_mode_ == SqlTextLoggingMode::all) {
+            return true;
+        }
+
+        return duration_ms >= sql_text_min_duration_ms_;
+    }
+
     void delete_self() override
     {
         delete this;
@@ -686,6 +728,8 @@ private:
 
     bool enable_sql_stats_ {false};
     bool enable_sql_text_stats_ {false};
+    SqlTextLoggingMode sql_text_logging_mode_ {SqlTextLoggingMode::all};
+    std::uint64_t sql_text_min_duration_ms_ {0};
     // Общий отладочный лог для этого экземпляра плагина.
     std::shared_ptr<DebugLog> debug_log_;
     // Хранится в основном для логов и удобства просмотра;

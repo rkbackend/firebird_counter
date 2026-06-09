@@ -14,6 +14,15 @@ enable_sql_stats = true
 # раздувать spool и SQLite без явного решения.
 enable_sql_text_stats = false
 
+# Режим записи полных SQL-текстов:
+# - all: писать все SQL
+# - threshold: писать только SQL с длительностью не меньше порога ниже
+sql_text_logging_mode = all
+
+# Порог в миллисекундах для режима `threshold`.
+# Если выбран режим `all`, это значение игнорируется.
+sql_text_min_duration_ms = 100
+
 # Необязательный allow-list фрагментов пути к БД, разделенных `;`.
 # Оставьте пустым, чтобы учитывать все базы.
 include_databases =

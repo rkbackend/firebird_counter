@@ -36,6 +36,26 @@ std::vector<std::string> split_list(const std::string& value)
     return parts;
 }
 
+SqlTextLoggingMode parse_sql_text_logging_mode(const std::string& raw_value)
+{
+    // Для режима логирования поддерживаем короткие и очевидные значения,
+    // чтобы конфиг было проще читать глазами на сервере.
+    std::string value = raw_value;
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+
+    if (value == "all") {
+        return SqlTextLoggingMode::all;
+    }
+
+    if (value == "threshold") {
+        return SqlTextLoggingMode::threshold;
+    }
+
+    throw std::runtime_error("Invalid sql_text_logging_mode: " + raw_value);
+}
+
 bool parse_bool_value(const std::string& raw_value)
 {
     // Поддерживаем несколько привычных форматов булевых значений, чтобы
@@ -106,6 +126,12 @@ CollectorConfig load_collector_config_from_file(const std::filesystem::path& pat
         }
         else if (key == "enable_sql_text_stats") {
             config.enable_sql_text_stats = parse_bool_value(value);
+        }
+        else if (key == "sql_text_logging_mode") {
+            config.sql_text_logging_mode = parse_sql_text_logging_mode(value);
+        }
+        else if (key == "sql_text_min_duration_ms") {
+            config.sql_text_min_duration_ms = static_cast<std::uint64_t>(std::stoull(value));
         }
         else if (key == "include_databases") {
             config.include_databases = split_list(value);

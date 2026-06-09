@@ -408,9 +408,18 @@ debug_log_path = /tmp/proc_usage_trace_debug.log
 flush_interval_sec = 5
 enable_sql_stats = true
 enable_sql_text_stats = false
+sql_text_logging_mode = all
+sql_text_min_duration_ms = 100
 include_databases =
 exclude_databases =
 ```
+
+Для полных SQL-текстов доступны два режима:
+
+- `sql_text_logging_mode = all` - сохранять все SQL-тексты
+- `sql_text_logging_mode = threshold` - сохранять только SQL, где длительность не меньше `sql_text_min_duration_ms`
+
+Если `enable_sql_text_stats = false`, оба параметра выше игнорируются.
 
 4. Передайте путь к конфигу через окружение сервиса Firebird или настройте те же ключи в `plugins.conf`:
 
